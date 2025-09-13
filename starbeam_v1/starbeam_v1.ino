@@ -30,20 +30,76 @@
 // NRF24
 #include "RF24.h"
 #include <SPI.h>
-#include "analyzer.h"
+// #include "analyzer.h" // Merged into this file
 // CC1101
 #include <ELECHOUSE_CC1101_SRC_DRV.h>
 // 2nd CC1101
 #include <ELECHOUSE_CC1101_SRC_DRV2.h>
 #include <EEPROM.h>
+
+//================================================================================
+// USER CONFIGURATION
+// All user-configurable settings are located in this section.
+//================================================================================
+
+// --- Pinout Definitions ---
+// NRF24 Radio Pins (VSPI - Top 3 Radios)
+#define NRF1_CE_PIN 27
+#define NRF1_CS_PIN 15
+#define NRF2_CE_PIN 26
+#define NRF2_CS_PIN 33
+#define NRF3_CE_PIN 25
+#define NRF3_CS_PIN 5
+
+// NRF24 Radio Pins (HSPI - Side 2 Radios)
+#define NRF4_CE_PIN 4
+#define NRF4_CS_PIN 2
+#define NRF5_CE_PIN 32
+#define NRF5_CS_PIN 17
+
+// CC1101 Radio Pins
+// Note: These share SPI pins (SCK, MISO, MOSI) but have unique SS and GDO pins.
+const byte CC1_SCK_PIN = 14;
+const byte CC1_MISO_PIN = 12;
+const byte CC1_MOSI_PIN = 13;
+const byte CC1_SS_PIN = 2;
+const int CC1_GDO0_PIN = 4;
+const int CC1_GDO2_PIN = 16;
+
+const byte CC2_SCK_PIN = 14;
+const byte CC2_MISO_PIN = 12;
+const byte CC2_MOSI_PIN = 13;
+const byte CC2_SS_PIN = 32;
+const int CC2_GDO0_PIN = 35;
+const int CC2_GDO2_PIN = 17;
+
+// On-board Buttons & LED
+#define UP_BUTTON_PIN 39
+#define DOWN_BUTTON_PIN 34
+#define SELECT_BUTTON_PIN 36
+#define LED_PIN 16
+
+// --- Display Configuration ---
+// OLED display settings for SSD1306 128x64 0.96inch. Change if using a different display.
+#define SCREEN_WIDTH 128
+#define SCREEN_HEIGHT 64
+#define OLED_RESET -1
+#define SSD1306_I2C_ADDRESS 0x3C
+
+// --- Buffer & Memory Sizes ---
+#define CCBUFFERSIZE 64           // Size of the CC1101 communication buffer
+#define RECORDINGBUFFERSIZE 4096  // Buffer for recording raw signal frames
+#define EPROMSIZE 512             // Size of EEPROM. For ESP32 it is Flash simulated (max 512 bytes)
+#define BUF_LENGTH 128            // Buffer for incoming serial commands
+#define MAX_SIGNALS 4             // Maximum number of signals to store and display in scanner mode
+
+//================================================================================
+// END OF USER CONFIGURATION
+//================================================================================
+
 // Create CC1101 instances
 ELECHOUSE_CC1101 CC1;    // First radio
 ELECHOUSE_CC1101_2 CC2;  // Second radio
-#define CCBUFFERSIZE 64
-#define RECORDINGBUFFERSIZE 4096  // Buffer for recording the frames
-#define EPROMSIZE 512             // Size of EEPROM in your Arduino chip. For ESP32 it is Flash simulated only 512 bytes, ESP8266 is 4096
-#define BUF_LENGTH 128            // Buffer for the incoming command.
-#define MAX_SIGNALS 4             // Maximum number of signals to store and display
 
 struct SignalInfo {
   float frequency;
@@ -51,49 +107,6 @@ struct SignalInfo {
   unsigned long timestamp;
 };
 
-// NrF24 Triple Module Pin Setup
-SPIClass vspi(VSPI);
-SPIClass hspi(HSPI);
-// radio(CE, CS)
-RF24 radio(27, 15, 16000000);   // Radio 1
-RF24 radio2(26, 33, 16000000);  // Radio 2
-RF24 radio3(25, 5, 16000000);   // Radio 3
-
-// RIGHT SWITCH, CC1101 has same pins as NRF24, but GDO02 is IRQ for NRF24 and not used
-RF24 radio4(4, 2, 16000000);    // Radio 4 / CC1 on starbeam schematic
-RF24 radio5(32, 17, 16000000);  // Radio 5 CC2
-
-// CC1101 #1 -- CC1
-const byte sck1 = 14;
-const byte miso1 = 12;
-const byte mosi1 = 13;
-const byte ss1 = 2;
-const int gdo0_1 = 4;
-const int gdo2_1 = 16;
-
-// CC1101 #2 - CC2
-const byte sck2 = 14;
-const byte miso2 = 12;
-const byte mosi2 = 13;
-const byte ss2 = 32;
-const int gdo0_2 = 35;
-const int gdo2_2 = 17;
-
-// OLED display settings for SSD1306 128x64 .96inch -- change if using different display.
-#define SCREEN_WIDTH 128
-#define SCREEN_HEIGHT 64
-#define OLED_RESET -1
-#define SSD1306_I2C_ADDRESS 0x3C
-Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
-// U8g2 Fonts for Adafruit GFX
-U8G2_FOR_ADAFRUIT_GFX u8g2_for_adafruit_gfx;
-
-// LED
-#define LED_PIN 16
-// Buttons -- make sure to align with you setup
-#define UP_BUTTON_PIN 39
-#define DOWN_BUTTON_PIN 34
-#define SELECT_BUTTON_PIN 36
 
 // STATE MANAGEMENT -- This is where you control the logic of the menu options
 enum AppState {
@@ -280,11 +293,12 @@ bool isButtonPressed(uint8_t pin) {
   return false;
 }
 
-// This handles the menu selection
+// This handles the menu navigation and selection logic.
 void handleMenuSelection() {
   static bool buttonPressed = false;
 
   if (!buttonPressed) {
+    // Handle UP button press for scrolling through the menu.
     if (isButtonPressed(UP_BUTTON_PIN)) {
       // Wrap around if at the top
       selectedMenuItem = static_cast<MenuItem>((selectedMenuItem == 0) ? (NUM_MENU_ITEMS - 1) : (selectedMenuItem - 1));
@@ -298,6 +312,7 @@ void handleMenuSelection() {
       Serial.println("UP button pressed");
       drawMenu();
       buttonPressed = true;
+    // Handle DOWN button press for scrolling through the menu.
     } else if (isButtonPressed(DOWN_BUTTON_PIN)) {
       // Wrap around if at the bottom
       selectedMenuItem = static_cast<MenuItem>((selectedMenuItem + 1) % NUM_MENU_ITEMS);
@@ -312,13 +327,15 @@ void handleMenuSelection() {
       Serial.println("DOWN button pressed");
       drawMenu();
       buttonPressed = true;
+    // Handle SELECT button press to execute the chosen menu item.
     } else if (isButtonPressed(SELECT_BUTTON_PIN)) {
       Serial.println("SELECT button pressed");
       executeSelectedMenuItem();
       buttonPressed = true;
     }
   } else {
-    // If no button is pressed, reset the buttonPressed flag
+    // This part ensures a button press is only registered once.
+    // The flag is reset only when all buttons are released.
     if (!isButtonPressed(UP_BUTTON_PIN) && !isButtonPressed(DOWN_BUTTON_PIN) && !isButtonPressed(SELECT_BUTTON_PIN)) {
       buttonPressed = false;
       digitalWrite(LED_PIN, LOW);  // Turn off LED
@@ -400,39 +417,11 @@ void displayInfoScreen() {
 
 //// ------- NRF24 SETUP ------------
 
-// Top 3 Radios of StarBeam
-void initRadios() {
-  display.clearDisplay();
-  u8g2_for_adafruit_gfx.setFont(u8g2_font_baby_tf);
-
-  // Ensure proper SPI pin configuration for VSPI
-  vspi.begin();
-  pinMode(33, INPUT_PULLUP);  // Soft pull-up
-  pinMode(26, OUTPUT);        // Radio 2 CE
-
-  // Display status
-  u8g2_for_adafruit_gfx.setCursor(0, 10);
-  u8g2_for_adafruit_gfx.print("Initializing Radios...");
-  display.display();
-  delay(500);
-
-  // Function to initialize radios
-  bool radio1_status = initializeRadio(radio, "Radio 1", 22);
-  nonBlockingDelay(2000);  // Small delay between radio initializations
-  bool radio2_status = initializeRadio(radio2, "Radio 2", 30);
-  nonBlockingDelay(2000);
-  bool radio3_status = initializeRadio(radio3, "Radio 3", 38);
-
-  // Final display update
-  display.display();
-}
-
-
-// Helper function to initialize each radio
-bool initializeRadio(RF24 &radio, const char *name, int yPos) {
+// Helper function to initialize each NRF24 radio
+bool initializeNrfRadio(RF24 &radio, SPIClass &spi, const char *name, int yPos) {
   u8g2_for_adafruit_gfx.setCursor(0, yPos);
 
-  if (radio.begin(&vspi)) {
+  if (radio.begin(&spi)) {
     Serial.printf("%s Started\n", name);
     radio.setAutoAck(false);
     radio.stopListening();
@@ -454,53 +443,53 @@ bool initializeRadio(RF24 &radio, const char *name, int yPos) {
   }
 }
 
-// Testing 2 NRF's #4(left radio) & #5 (right radio) on HSPI
-// Even if the radios arent connected, it wont mess up operation
+// Top 3 Radios of StarBeam (VSPI)
+void initRadios() {
+  display.clearDisplay();
+  u8g2_for_adafruit_gfx.setFont(u8g2_font_baby_tf);
+
+  // Ensure proper SPI pin configuration for VSPI
+  vspi.begin();
+  pinMode(33, INPUT_PULLUP);  // Soft pull-up
+  pinMode(26, OUTPUT);        // Radio 2 CE
+
+  // Display status
+  u8g2_for_adafruit_gfx.setCursor(0, 10);
+  u8g2_for_adafruit_gfx.print("Initializing Radios...");
+  display.display();
+  delay(500);
+
+  // Initialize radios
+  initializeNrfRadio(radio, vspi, "Radio 1", 22);
+  nonBlockingDelay(2000);
+  initializeNrfRadio(radio2, vspi, "Radio 2", 30);
+  nonBlockingDelay(2000);
+  initializeNrfRadio(radio3, vspi, "Radio 3", 38);
+
+  // Final display update
+  display.display();
+}
+
+// Side 2 Radios of StarBeam (HSPI)
 void initRadiosHspi() {
   display.clearDisplay();
   u8g2_for_adafruit_gfx.setFont(u8g2_font_baby_tf);
 
   // Ensure proper SPI pin configuration for HSPI
   hspi.begin();
-  // pinMode(33, INPUT_PULLUP);  // Soft pull-up
-  // pinMode(26, OUTPUT);        // Radio 2 CE
-  //  Initialize each radio
-  u8g2_for_adafruit_gfx.setCursor(0, 40);
+
+  // Display status
+  u8g2_for_adafruit_gfx.setCursor(0, 10);
   u8g2_for_adafruit_gfx.print("Initializing Radios...");
   display.display();
-  delay(500);  // Small delay for readability
-  u8g2_for_adafruit_gfx.setCursor(0, 45);
-  if (radio4.begin(&hspi)) {
-    Serial.println("Radio 4 Started");
-    radio4.setAutoAck(false);
-    radio4.stopListening();
-    radio4.setRetries(0, 0);
-    radio4.setPALevel(RF24_PA_MAX, true);
-    radio4.setDataRate(RF24_2MBPS);
-    radio4.setCRCLength(RF24_CRC_DISABLED);
-    radio4.printPrettyDetails();
-    radio4.startConstCarrier(RF24_PA_MAX, 45);
-    u8g2_for_adafruit_gfx.print("Radio 4 Initialized!");
-  } else {
-    Serial.println("Radio 4 Failed to Start");
-    u8g2_for_adafruit_gfx.print("Radio 4 Failed!");
-  }
-  u8g2_for_adafruit_gfx.setCursor(0, 53);
-  if (radio5.begin(&hspi)) {
-    Serial.println("Radio 5 Started");
-    radio5.setAutoAck(false);
-    radio5.stopListening();
-    radio5.setRetries(0, 0);
-    radio5.setPALevel(RF24_PA_MAX, true);
-    radio5.setDataRate(RF24_2MBPS);
-    radio5.setCRCLength(RF24_CRC_DISABLED);
-    radio5.printPrettyDetails();
-    radio5.startConstCarrier(RF24_PA_MAX, 45);
-    u8g2_for_adafruit_gfx.print("Radio 5 Initialized!");
-  } else {
-    Serial.println("Radio 5 Failed to Start");
-    u8g2_for_adafruit_gfx.print("Radio 5 Failed!");
-  }
+  delay(500);
+
+  // Initialize radios
+  initializeNrfRadio(radio4, hspi, "Radio 4", 22);
+  nonBlockingDelay(2000);
+  initializeNrfRadio(radio5, hspi, "Radio 5", 30);
+
+  // Final display update
   display.display();
 }
 
@@ -592,6 +581,201 @@ void channelRange() {
   radio5.setChannel(randomNumber);
 }
 // ------- NRF24 SETUP END ------------
+
+
+// -------- NRF24 ANALYZER START --------
+// Code adapted from https://github.com/cifertech/nrfbox
+
+// Analyzer settings
+#define ANALYZER_MAX_CHANNELS      128       // Total available channels
+#define ANALYZER_HISTORY_SIZE      120       // Number of historical values to keep (for graph)
+#define ANALYZER_SIGNAL_MAX        10        // Maximum signal strength value
+#define ANALYZER_SCAN_INTERVAL     10        // Time between scans in milliseconds
+
+// Analyzer global variables
+uint8_t analyzer_currentChannel = 0;
+uint8_t analyzer_signalHistory[ANALYZER_HISTORY_SIZE];
+uint8_t analyzer_historyIndex = 0;
+uint8_t analyzer_maxSignal = 0;
+unsigned long analyzer_lastButtonCheck = 0;
+unsigned long analyzer_lastChannelScan = 0;
+
+// Forward declarations for analyzer functions
+void analyzerSetup();
+void analyzerLoop();
+void analyzerConfigureRadio();
+uint8_t analyzerDetectSignal();
+void analyzerAddSignalToHistory(uint8_t signal);
+void analyzerPerformScan();
+void analyzerDrawGraph();
+void analyzerCheckButtons();
+
+
+// Configure the radio for analyzer mode
+void analyzerConfigureRadio() {
+  // Use the main 'radio' object for the analyzer.
+  // The NRF jammer functions use RF24_2MBPS, but the analyzer uses 1MBPS for better sensitivity.
+  radio.stopListening();
+  radio.setDataRate(RF24_1MBPS);
+  radio.setAutoAck(false);
+  radio.setCRCLength(RF24_CRC_DISABLED);
+  radio.powerUp();
+  Serial.println("Radio configured for NRF Analyzer.");
+}
+
+// Check for RF energy on current channel
+uint8_t analyzerDetectSignal() {
+  uint8_t strength = 0;
+  radio.setChannel(analyzer_currentChannel);
+
+  // Do multiple samples to get a more stable reading
+  for (int i = 0; i < 5; i++) {
+    radio.startListening();
+    delayMicroseconds(125); // A short delay is required for the RPD to settle
+    if (radio.testRPD()) {
+      strength += 2;
+    }
+    radio.stopListening();
+    delayMicroseconds(20);
+  }
+
+  // Cap the maximum value
+  if (strength > ANALYZER_SIGNAL_MAX) {
+    strength = ANALYZER_SIGNAL_MAX;
+  }
+
+  return strength;
+}
+
+// Add a new signal measurement to history
+void analyzerAddSignalToHistory(uint8_t signal) {
+  analyzer_signalHistory[analyzer_historyIndex] = signal;
+
+  // Update maximum value if needed
+  if (signal > analyzer_maxSignal) {
+    analyzer_maxSignal = signal;
+  } else {
+    // Recalculate max if we're at a full cycle
+    if (analyzer_historyIndex == 0) {
+      analyzer_maxSignal = 0;
+      for (int i = 0; i < ANALYZER_HISTORY_SIZE; i++) {
+        if (analyzer_signalHistory[i] > analyzer_maxSignal) {
+          analyzer_maxSignal = analyzer_signalHistory[i];
+        }
+      }
+    }
+  }
+
+  // Move to next position in the circular buffer
+  analyzer_historyIndex = (analyzer_historyIndex + 1) % ANALYZER_HISTORY_SIZE;
+}
+
+// Scan the current channel for signals
+void analyzerPerformScan() {
+  if (millis() - analyzer_lastChannelScan < ANALYZER_SCAN_INTERVAL) {
+    return;
+  }
+  analyzer_lastChannelScan = millis();
+
+  uint8_t signal = analyzerDetectSignal();
+  analyzerAddSignalToHistory(signal);
+}
+
+// Draw the signal history graph for a single channel
+void analyzerDrawGraph() {
+  display.clearDisplay();
+
+  u8g2_for_adafruit_gfx.setFont(u8g2_font_ncenB10_tr);
+  u8g2_for_adafruit_gfx.setCursor(0, 10);
+  u8g2_for_adafruit_gfx.print("Channel: ");
+  u8g2_for_adafruit_gfx.print(analyzer_currentChannel);
+
+  display.drawFastHLine(0, 12, SCREEN_WIDTH, SSD1306_WHITE);
+
+  u8g2_for_adafruit_gfx.setFont(u8g2_font_profont10_mr);
+  u8g2_for_adafruit_gfx.setCursor(0, 22);
+  u8g2_for_adafruit_gfx.print("Max");
+  u8g2_for_adafruit_gfx.setCursor(0, SCREEN_HEIGHT - 2);
+  u8g2_for_adafruit_gfx.print("Min");
+
+  display.drawFastVLine(20, 13, SCREEN_HEIGHT - 13, SSD1306_WHITE);
+
+  float xScale = (float)(SCREEN_WIDTH - 25) / ANALYZER_HISTORY_SIZE;
+  float yScale = (analyzer_maxSignal > 0) ? (float)(SCREEN_HEIGHT - 15) / ANALYZER_SIGNAL_MAX : 0;
+
+  // Draw the historical signal graph
+  for (int i = 0; i < ANALYZER_HISTORY_SIZE - 1; i++) {
+    int idx1 = (analyzer_historyIndex + i) % ANALYZER_HISTORY_SIZE;
+    int idx2 = (analyzer_historyIndex + i + 1) % ANALYZER_HISTORY_SIZE;
+
+    int x1 = 22 + i * xScale;
+    int x2 = 22 + (i + 1) * xScale;
+
+    int y1 = SCREEN_HEIGHT - 2 - (analyzer_signalHistory[idx1] * yScale);
+    int y2 = SCREEN_HEIGHT - 2 - (analyzer_signalHistory[idx2] * yScale);
+
+    display.drawLine(x1, y1, x2, y2, SSD1306_WHITE);
+  }
+
+  uint8_t currentSignal = analyzer_signalHistory[(analyzer_historyIndex == 0) ? ANALYZER_HISTORY_SIZE - 1 : analyzer_historyIndex - 1];
+  u8g2_for_adafruit_gfx.setCursor(SCREEN_WIDTH - 40, 22);
+  u8g2_for_adafruit_gfx.print("Sig:");
+  u8g2_for_adafruit_gfx.print(currentSignal);
+
+  display.display();
+}
+
+// Handle button presses for the analyzer mode
+void analyzerCheckButtons() {
+  if (millis() - analyzer_lastButtonCheck < 200) { // Slower debounce
+    return;
+  }
+
+  if (isButtonPressed(UP_BUTTON_PIN)) {
+    analyzer_currentChannel = (analyzer_currentChannel + 1) % ANALYZER_MAX_CHANNELS;
+    memset(analyzer_signalHistory, 0, sizeof(analyzer_signalHistory));
+    analyzer_maxSignal = 0;
+    analyzer_historyIndex = 0;
+    analyzer_lastButtonCheck = millis();
+  }
+
+  if (isButtonPressed(DOWN_BUTTON_PIN)) {
+    analyzer_currentChannel = (analyzer_currentChannel == 0) ? (ANALYZER_MAX_CHANNELS - 1) : (analyzer_currentChannel - 1);
+    memset(analyzer_signalHistory, 0, sizeof(analyzer_signalHistory));
+    analyzer_maxSignal = 0;
+    analyzer_historyIndex = 0;
+    analyzer_lastButtonCheck = millis();
+  }
+}
+
+// Setup function to initialize the analyzer mode
+void analyzerSetup() {
+  Serial.println("NRF24 Analyzer Mode Started");
+
+  // Initialize history buffer and state variables
+  memset(analyzer_signalHistory, 0, sizeof(analyzer_signalHistory));
+  analyzer_currentChannel = 0;
+  analyzer_historyIndex = 0;
+  analyzer_maxSignal = 0;
+
+  // Configure the 'radio' object for scanning
+  analyzerConfigureRadio();
+}
+
+// Main loop for the analyzer mode
+void analyzerLoop() {
+  analyzerCheckButtons();
+  analyzerPerformScan();
+
+  static unsigned long lastDisplayUpdate = 0;
+  if (millis() - lastDisplayUpdate > 50) { // Limit to 20 FPS
+    analyzerDrawGraph();
+    lastDisplayUpdate = millis();
+  }
+}
+
+// -------- NRF24 ANALYZER END --------
+
 
 // ------- CC1101 SETUP START ------------
 // position in big recording buffer
@@ -687,11 +871,11 @@ void CC1::GDO_Set (void)
 // Initialize CC1101 board with default settings, you may change your preferences here
 static void cc1101initialize(void) {
   // initializing library with custom pins selected
-  CC1.setSpiPin(sck1, miso1, mosi1, ss1);
-  CC1.setGDO(gdo0_1, gdo2_1);
+  CC1.setSpiPin(CC1_SCK_PIN, CC1_MISO_PIN, CC1_MOSI_PIN, CC1_SS_PIN);
+  CC1.setGDO(CC1_GDO0_PIN, CC1_GDO2_PIN);
   // Main part to tune CC1101 with proper frequency, modulation and encoding
   CC1.Init();  // must be set to initialize the cc1101!
-  CC1.setGDO0(gdo0_1);
+  CC1.setGDO0(CC1_GDO0_PIN);
   CC1.setCCMode(1);           // set config for internal transmission mode. value 0 is for RAW recording/replaying
   CC1.setModulation(2);       // set modulation mode. 0 = 2-FSK, 1 = GFSK, 2 = ASK/OOK, 3 = 4-FSK, 4 = MSK.
   CC1.setMHZ(433.92);         // Here you can set your basic frequency. The lib calculates the frequency automatically (default = 433.92).The cc1101 can: 300-348 MHZ, 387-464MHZ and 779-928MHZ. Read More info from datasheet.
@@ -722,11 +906,11 @@ static void cc1101initialize(void) {
 // CC1101 inititialization using 2nd library
 static void cc1101initialize_2(void) {
   // initializing library with custom pins selected
-  CC2.setSpiPin(sck2, miso2, mosi2, ss2);
-  CC2.setGDO(gdo0_2, gdo2_2);
+  CC2.setSpiPin(CC2_SCK_PIN, CC2_MISO_PIN, CC2_MOSI_PIN, CC2_SS_PIN);
+  CC2.setGDO(CC2_GDO0_PIN, CC2_GDO2_PIN);
   // Main part to tune CC1101 with proper frequency, modulation and encoding
   CC2.Init();  // must be set to initialize the cc1101!
-  CC2.setGDO0(gdo0_2);
+  CC2.setGDO0(CC2_GDO0_PIN);
   CC2.setCCMode(1);           // set config for internal transmission mode. value 0 is for RAW recording/replaying
   CC2.setModulation(2);       // set modulation mode. 0 = 2-FSK, 1 = GFSK, 2 = ASK/OOK, 3 = 4-FSK, 4 = MSK.
   CC2.setMHZ(433.92);         // Here you can set your basic frequency. The lib calculates the frequency automatically (default = 433.92).The cc1101 can: 300-348 MHZ, 387-464MHZ and 779-928MHZ. Read More info from datasheet.
@@ -1278,16 +1462,16 @@ void bruteForce(int setting, int setting2) {
     CC1.setPktFormat(3);
     CC1.SetTx();
     Serial.print(F("\r\nStarting Brute Forcing press any key to stop...\r\n"));
-    pinMode(gdo0_1, OUTPUT);
-    pinMode(gdo0_2, OUTPUT);
+    pinMode(CC1_GDO0_PIN, OUTPUT);
+    pinMode(CC2_GDO0_PIN, OUTPUT);
     int poweroftwo = 1 << setting2;
     for (brute = 0; brute < poweroftwo; brute++) {
       for (int k = 0; k < 5; k++)  // sending 5 times each code
       {
         for (int j = (setting2 - 1); j > -1; j--)  // j bits in a value brute
         {
-          digitalWrite(gdo0_1, bitRead(brute, j));  // Set GDO0 according to actual brute force value
-          digitalWrite(gdo0_2, bitRead(brute, j));  // Set GDO0 according to actual brute force value
+          digitalWrite(CC1_GDO0_PIN, bitRead(brute, j));  // Set GDO0 according to actual brute force value
+          digitalWrite(CC2_GDO0_PIN, bitRead(brute, j));  // Set GDO0 according to actual brute force value
           delayMicroseconds(setting);               // delay for selected sampling interval
         };                                          // end of J loop
       };                                            // end of K loop
@@ -1338,8 +1522,8 @@ void recordRawData(int interval) {
     Serial.println(F("Waiting for radio signal to start RAW recording..."));
     updateDisplay("Waiting for signal...");
 
-    pinMode(gdo0_1, INPUT);
-    while (digitalRead(gdo0_1) == LOW)
+    pinMode(CC1_GDO0_PIN, INPUT);
+    while (digitalRead(CC1_GDO0_PIN) == LOW)
       ;
 
     Serial.println(F("Starting RAW recording..."));
@@ -1348,7 +1532,7 @@ void recordRawData(int interval) {
     for (int i = 0; i < RECORDINGBUFFERSIZE; i++) {
       byte receivedbyte = 0;
       for (int j = 7; j > -1; j--) {
-        bitWrite(receivedbyte, j, digitalRead(gdo0_1));
+        bitWrite(receivedbyte, j, digitalRead(CC1_GDO0_PIN));
         delayMicroseconds(interval);
       }
       bigrecordingbuffer[i] = receivedbyte;
@@ -1370,12 +1554,12 @@ void sniffRawData(int interval) {
     Serial.println(F("Sniffer enabled..."));
     updateDisplay("Sniffer enabled...");
 
-    pinMode(gdo0_1, INPUT);
+    pinMode(CC1_GDO0_PIN, INPUT);
     while (!Serial.available()) {
       for (int i = 0; i < RECORDINGBUFFERSIZE; i++) {
         byte receivedbyte = 0;
         for (int j = 7; j > -1; j--) {
-          bitWrite(receivedbyte, j, digitalRead(gdo0_1));
+        bitWrite(receivedbyte, j, digitalRead(CC1_GDO0_PIN));
           delayMicroseconds(interval);
         }
         bigrecordingbuffer[i] = receivedbyte;
@@ -1397,11 +1581,11 @@ void playRawData(int interval) {
     Serial.println(F("Replaying RAW data..."));
     updateDisplay("Replaying RAW data...");
 
-    pinMode(gdo0_1, OUTPUT);
+    pinMode(CC1_GDO0_PIN, OUTPUT);
     for (int i = 1; i < RECORDINGBUFFERSIZE; i++) {
       byte receivedbyte = bigrecordingbuffer[i];
       for (int j = 7; j > -1; j--) {
-        digitalWrite(gdo0_1, bitRead(receivedbyte, j));
+        digitalWrite(CC1_GDO0_PIN, bitRead(receivedbyte, j));
         delayMicroseconds(interval);
       }
     }
@@ -1695,10 +1879,12 @@ void initializeCC1101() {
 
 // **** Menu Functions ****
 
-// Handles executing functions and calling the related functions
+// Executes the function associated with the currently selected menu item.
+// This is the primary router for the application's features.
 void executeSelectedMenuItem() {
   switch (selectedMenuItem) {
 
+    // NRF24 Jamming Modes
     case BT_JAM:
       currentState = STATE_BT_JAM;
       Serial.println("BT JAM button pressed");
@@ -1915,74 +2101,78 @@ void executeSelectedMenuItem() {
   }
 }
 
-// SETUP + LOOP
+// Main setup function, runs once on boot.
 void setup() {
+  // Start serial communication
   Serial.begin(115200);
-  delay(3000);
+  delay(3000); // Wait for serial monitor to connect
+
+  // Initialize the OLED display
   initDisplay();
-  // Disable unnecessary wireless interfaces
+
+  // To save power and avoid interference, disable BT and WiFi by default.
+  // They can be re-enabled by specific functions if needed.
   esp_bt_controller_deinit();
   esp_wifi_stop();
   esp_wifi_deinit();
 
+  // Configure button and LED pins
   pinMode(UP_BUTTON_PIN, INPUT);
   pinMode(DOWN_BUTTON_PIN, INPUT);
   pinMode(SELECT_BUTTON_PIN, INPUT);
   pinMode(LED_PIN, OUTPUT);
-  // Initialize U8g2_for_Adafruit_GFX
+
+  // Initialize the font renderer
   u8g2_for_adafruit_gfx.begin(display);
 
-  // Display splash screens
+  // Display splash screen
   demonSHIT();
-  delay(2000);  // Show title screen for 3 seconds
-                // displayInfoScreen();
-                // delay(5000);  // Show info screen for 5 seconds
-  // Initial display
+  delay(2000);
 
+  // Initialize the CC1101 radios and display their status
   display.clearDisplay();
   u8g2_for_adafruit_gfx.setFont(u8g2_font_baby_tf);
-  cc1101initialize();
-  cc1101initialize_2();
+  initializeCC1101();
 
-  if (CC1.getCC1101()) {  // Check the CC1101 Spi connection.
-    Serial.println(F("cc1101 #1 initialized. Connection OK\n\r"));
+  if (CC1.getCC1101()) {
+    Serial.println(F("CC1101 #1: Connection OK"));
     u8g2_for_adafruit_gfx.setCursor(0, 30);
-    u8g2_for_adafruit_gfx.print("cc1101 initialized. Connection OK");
-    display.display();
-    delay(3000);
+    u8g2_for_adafruit_gfx.print("CC1101 #1: Connection OK");
   } else {
-    Serial.println(F("cc1101 #1 connection error! check the wiring.\n\r"));
+    Serial.println(F("CC1101 #1: Connection ERROR!"));
     u8g2_for_adafruit_gfx.setCursor(0, 30);
-    u8g2_for_adafruit_gfx.print("cc1101 connection ERROR!. Connection OK");
-    u8g2_for_adafruit_gfx.setCursor(0, 40);
-    u8g2_for_adafruit_gfx.print("CHECK WIRING!");
+    u8g2_for_adafruit_gfx.print("CC1101 #1: Connection ERROR!");
+  }
+  display.display();
+  delay(1500);
 
-    display.display();
-    delay(3000);
-  };
-  if (CC2.getCC1101()) {  // Check the CC1101 Spi connection.
-    Serial.println(F("cc1101 #2 initialized. Connection OK\n\r"));
+  if (CC2.getCC1101()) {
+    Serial.println(F("CC1101 #2: Connection OK"));
     u8g2_for_adafruit_gfx.setCursor(0, 40);
-    u8g2_for_adafruit_gfx.print("cc1101 initialized. Connection OK");
-    display.display();
-    delay(3000);
+    u8g2_for_adafruit_gfx.print("CC1101 #2: Connection OK");
   } else {
-    Serial.println(F("cc1101 #1 connection error! check the wiring.\n\r"));
+    Serial.println(F("CC1101 #2: Connection ERROR!"));
     u8g2_for_adafruit_gfx.setCursor(0, 40);
-    u8g2_for_adafruit_gfx.print("cc1101 connection ERROR!. Connection OK");
-    u8g2_for_adafruit_gfx.setCursor(0, 50);
-    u8g2_for_adafruit_gfx.print("CHECK WIRING!");
-    display.display();
-    delay(3000);
-  };
+    u8g2_for_adafruit_gfx.print("CC1101 #2: Connection ERROR!");
+  }
+  display.display();
+  delay(2000);
+
+  // Draw the main menu for the first time
   drawMenu();
 }
 
+// Main application loop, runs continuously after setup.
 void loop() {
+  // The main state machine. It checks the current state and calls the appropriate handler.
   switch (currentState) {
+    // STATE_MENU: Default state, handles button presses to navigate the menu.
     case STATE_MENU:
       handleMenuSelection();
       break;
+
+    // For all active states (jamming, scanning, etc.), this block checks for the
+    // SELECT button press to exit back to the main menu.
     case STATE_BT_JAM:
       if (isButtonPressed(SELECT_BUTTON_PIN)) {
         currentState = STATE_MENU;
@@ -2202,68 +2392,56 @@ void loop() {
   }
   int i = 0;
 
-  /* Process incoming commands. */
+  /*
+   *  Serial Command Line Interface (CLI) & RF Packet Processing
+   *  This section runs on every loop, checking for incoming data from two sources:
+   *  1. The Serial port (USB), for user-entered commands.
+   *  2. The CC1101 radio, for received RF packets.
+   */
+
+  // 1. Process incoming commands from the Serial port.
   while (Serial.available()) {
     static char buffer[BUF_LENGTH];
     static int length = 0;
 
-    // handling CHAT MODE
+    // Special handling for CHAT MODE
     if (chatmode == 1) {
-
-      // clear serial port buffer index
       i = 0;
-
-      // something was received over serial port put it into radio sending buffer
-      while (Serial.available() and (i < (CCBUFFERSIZE - 1))) {
-        // read single character from Serial port
+      // Read from serial and immediately transmit over radio
+      while (Serial.available() && (i < (CCBUFFERSIZE - 1))) {
         ccsendingbuffer[i] = Serial.read();
-
-        // also put it as ECHO back to serial port
-        Serial.write(ccsendingbuffer[i]);
-
-        // if CR was received add also LF character and display it on Serial port
-        if (ccsendingbuffer[i] == 0x0d) {
-          Serial.write(0x0a);
+        Serial.write(ccsendingbuffer[i]); // Echo back to the user
+        if (ccsendingbuffer[i] == '\r') {
+          Serial.write('\n');
           i++;
-          ccsendingbuffer[i] = 0x0a;
+          ccsendingbuffer[i] = '\n';
         }
-        //
-
-        // increase CC1101 TX buffer position
         i++;
       };
-
-      // put NULL at the end of CC transmission buffer
       ccsendingbuffer[i] = '\0';
-
-      // send these data to radio over CC1101
       CC1.SendData((char *)ccsendingbuffer);
     }
-    // handling CLI commands processing
+    // Normal command processing
     else {
       int data = Serial.read();
-      if (data == '\b' || data == '\177') {  // BS and DEL
-        if (length) {
+      if (data == '\b' || data == 127) { // Handle backspace/delete
+        if (length > 0) {
           length--;
-          if (do_echo)
-            Serial.write("\b \b");
+          if (do_echo) Serial.write("\b \b");
         }
       } else if (data == '\r' || data == '\n') {
-        if (do_echo)
-          Serial.write("\r\n");  // output CRLF
+        if (do_echo) Serial.write("\r\n");
         buffer[length] = '\0';
+        // TODO: Add command parsing logic here based on the 'buffer' content.
+        length = 0; // Reset for next command
       } else if (length < BUF_LENGTH - 1) {
         buffer[length++] = data;
-        if (do_echo)
-          Serial.write(data);
+        if (do_echo) Serial.write(data);
       }
-    };
-    // end of handling CLI processing
-  };
+    }
+  }
 
-  /* Process RF received packets */
-
-  // Checks whether something has been received.
+  // 2. Process incoming RF packets from the CC1101 radio.
   if (CC1.CheckReceiveFlag() && (receivingmode == 1 || recordingmode == 1 || chatmode == 1)) {
 
     // CRC Check. If "setCrc(false)" crc returns always OK!
