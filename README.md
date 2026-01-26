@@ -1,4 +1,4 @@
-# project starbeam
+# project starbeam v2 2026
 **The Ultimate ESP32 WiFi + BT + Drone Jammer w/ 5 Radios.**
 
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
