@@ -1,0 +1,16 @@
+In file included from /Users/cypher/Documents/Documents - David's MacBook Air/Development/coding/project-starbeam/starbeam_v2/starbeam_v2.ino:19:
+/Users/cypher/Documents/Documents - David's MacBook Air/Development/coding/project-starbeam/starbeam_v2/ui/display.h:10:10: fatal error: U8g2_for_Adafruit_GFX.h: No such file or directory
+   10 | #include <U8g2_for_Adafruit_GFX.h>
+      |          ^~~~~~~~~~~~~~~~~~~~~~~~~
+compilation terminated.
+
+[92mUsed library[0m         [92mVersion[0m [90mPath[0m
+[93mWire[0m                 3.3.0   [90m/Users/cypher/Library/Arduino15/packages/esp32/hardware/esp32/3.3.0/libraries/Wire[0m
+[93mAdafruit GFX Library[0m 1.12.2  [90m/Users/cypher/Documents/Arduino/libraries/Adafruit_GFX_Library[0m
+[93mAdafruit BusIO[0m       1.17.3  [90m/Users/cypher/Documents/Arduino/libraries/Adafruit_BusIO[0m
+[93mSPI[0m                  3.3.0   [90m/Users/cypher/Library/Arduino15/packages/esp32/hardware/esp32/3.3.0/libraries/SPI[0m
+[93mAdafruit SSD1306[0m     2.5.15  [90m/Users/cypher/Documents/Arduino/libraries/Adafruit_SSD1306[0m
+
+[92mUsed platform[0m [92mVersion[0m [90mPath[0m
+[93mesp32:esp32[0m   3.3.0   [90m/Users/cypher/Library/Arduino15/packages/esp32/hardware/esp32/3.3.0[0m
+Error during build: exit status 1
