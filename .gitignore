@@ -1,0 +1,31 @@
+# macOS filesystem noise
+.DS_Store
+._*
+
+# Editor and local workspace files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Arduino CLI / ESP32 build outputs
+build/
+build_test/
+**/build/
+*.bin
+*.elf
+*.hex
+*.map
+*.eep
+*.lst
+*.partitions.bin
+
+# Generated compile/upload logs
+*.log
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+*.bak

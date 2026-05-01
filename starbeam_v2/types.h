@@ -21,7 +21,10 @@ enum AppState {
   STATE_WIFI_SCAN,      // WiFi network scanner (uses ESP32 internal WiFi)
   STATE_WIFI_HEATMAP,   // WiFi channel heatmap (uses ESP32 internal WiFi)
   STATE_BLE_SCAN,       // BLE device scanner (uses ESP32 internal BLE)
-  STATE_WEBSERVER,      // Web server with captive portal (independent mode)
+  STATE_FLOCK_DETECTOR,   // Flock camera detector (promiscuous OUI scan)
+  STATE_CAPTIVE_PORTAL,   // Captive portal (10 phishing templates, credential capture)
+  STATE_PACKET_MONITOR,   // Passive WiFi packet monitor (promiscuous, per-frame stats)
+  STATE_WEBSERVER,        // Web server with captive portal (independent mode)
   // Security Testing States
   STATE_SEC_DEAUTH_TARGET,    // Targeted deauth attack
   STATE_SEC_DEAUTH_ALL,       // Broadcast deauth attack
@@ -67,7 +70,10 @@ enum MenuItem {
   WIFI_SCAN,      // WiFi network scanner
   WIFI_HEATMAP,   // WiFi channel heatmap
   BLE_SCAN,       // BLE device scanner
-  WEBSERVER_ON,   // Start web server
+  FLOCK_DETECTOR,   // Flock camera detector
+  CAPTIVE_PORTAL,   // Captive portal (10 templates)
+  PACKET_MONITOR,   // Passive WiFi packet monitor
+  WEBSERVER_ON,     // Start web server
   WEBSERVER_OFF,  // Stop web server
   WEBSERVER_STATUS, // Show web server status
   // Security Testing Menu Items

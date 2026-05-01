@@ -28,6 +28,9 @@
 #include "src/analyzer.h"
 #include "src/wifi_scanner.h"
 #include "src/ble_scanner.h"
+#include "src/flock_detector.h"
+#include "src/captive_portal.h"
+#include "src/packet_monitor.h"
 #include "src/webserver.h"
 #include "src/wifi_attack.h"
 #include "src/terminal.h"
@@ -136,6 +139,92 @@ void runWebServerMode() {
 
         // Process web requests
         StarbeamWebServer::handleClient();
+        yield();
+    }
+}
+
+// ============================================================================
+// Captive Portal Mode - Template Selection and Credential Capture
+// ============================================================================
+
+void runCaptivePortalMode() {
+    Display::displayLegalWarning();
+    while (!Input::isButtonPressed(BUTTON_SELECT)) yield();
+    delay(300);
+
+    // Template selection
+    int selectedTemplate = 0;
+    while (true) {
+        Display::displayInfo(
+            "Captive Portal",
+            String(selectedTemplate + 1) + "/" +
+                String(CaptivePortal::getTemplateCount()) + ": " +
+                String(CaptivePortal::getTemplateName(selectedTemplate)),
+            "[UP/DN]=Template",
+            "[SEL]=Start"
+        );
+
+        if (Input::isButtonPressed(BUTTON_UP)) {
+            selectedTemplate = (selectedTemplate + 1) % CaptivePortal::getTemplateCount();
+            delay(180);
+        }
+        if (Input::isButtonPressed(BUTTON_DOWN)) {
+            selectedTemplate = (selectedTemplate - 1 + CaptivePortal::getTemplateCount()) %
+                               CaptivePortal::getTemplateCount();
+            delay(180);
+        }
+        if (Input::isButtonPressed(BUTTON_SELECT)) {
+            delay(200);
+            break;
+        }
+        if (Terminal::stopRequested()) {
+            Terminal::clearStopFlag();
+            return;
+        }
+        yield();
+    }
+
+    CaptivePortal::init();
+    CaptivePortal::start(selectedTemplate);
+
+    Display::displayInfo(
+        "Portal ACTIVE",
+        CaptivePortal::getActiveSSID(),
+        "Captures: 0",
+        "[HOLD SEL]=Stop"
+    );
+
+    // Run loop
+    while (CaptivePortal::isRunning()) {
+        CaptivePortal::handleClient();
+
+        String line2 = CaptivePortal::getActiveSSID().substring(0, 16);
+        String line3 = "Cap:" + String(CaptivePortal::getCaptureCount()) +
+                       " Clients:" + String(CaptivePortal::getConnectedClients());
+        Display::displayInfo("Portal ACTIVE", line2, line3, "[HOLD SEL]=Stop");
+
+        // Long press SELECT to stop
+        if (Input::isButtonPressed(BUTTON_SELECT)) {
+            unsigned long pressStart = millis();
+            while (Input::isButtonPressed(BUTTON_SELECT)) {
+                if (millis() - pressStart > 1000) {
+                    Serial.println("Captured credentials:");
+                    CaptivePortal::printCapturesToSerial();
+                    CaptivePortal::stop();
+                    break;
+                }
+                yield();
+            }
+        }
+
+        if (Terminal::stopRequested()) {
+            Terminal::clearStopFlag();
+            Serial.println("Captive portal stopped via terminal");
+            CaptivePortal::printCapturesToSerial();
+            CaptivePortal::stop();
+            break;
+        }
+
         yield();
     }
 }
@@ -583,6 +672,24 @@ void executeSelectedMenuItem() {
             BLEScanner::init();
             BLEScanner::runScanner();
             BLEScanner::deinit();
+            break;
+
+        case FLOCK_DETECTOR:
+            currentState = STATE_FLOCK_DETECTOR;
+            Serial.println("FLOCK_DETECTOR selected");
+            FlockDetector::runDetector();
+            break;
+
+        case CAPTIVE_PORTAL:
+            currentState = STATE_CAPTIVE_PORTAL;
+            Serial.println("CAPTIVE_PORTAL selected");
+            runCaptivePortalMode();
+            break;
+
+        case PACKET_MONITOR:
+            currentState = STATE_PACKET_MONITOR;
+            Serial.println("PACKET_MONITOR selected");
+            PacketMonitor::runMonitor();
             break;
 
         case WEBSERVER_ON:
@@ -1099,6 +1206,9 @@ void loop() {
         case STATE_CC_SCAN:
         case STATE_WIFI_SCAN:
         case STATE_WIFI_HEATMAP:
+        case STATE_FLOCK_DETECTOR:
+        case STATE_CAPTIVE_PORTAL:
+        case STATE_PACKET_MONITOR:
         case STATE_CC1_SINGLE:
         case STATE_CC2_SINGLE:
         case STATE_REC_RAW:
