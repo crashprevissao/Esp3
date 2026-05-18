@@ -29,6 +29,10 @@ public:
     static void displayTitleScreen();
     static void displayInfoScreen();
 
+    // Animated boot intro (~3s). Multi-stage: starfield warp, title reveal,
+    // subtitle slide-in, scanline sweep hold.
+    static void playBootAnimation();
+
     // Legal warning for security testing features
     static void displayLegalWarning();
 

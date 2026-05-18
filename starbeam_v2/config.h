@@ -90,7 +90,10 @@
 
 #define CCBUFFERSIZE         64     // CC1101 buffer size
 #define RECORDINGBUFFERSIZE  4096   // Recording buffer size
-#define EEPROM_SIZE          512    // EEPROM size for ESP32
+#define EEPROM_SIZE          512    // EEPROM region reserved for raw recording (0..511)
+#define EEPROM_TOTAL_SIZE    1024   // Total EEPROM partition (recording + settings + future)
+#define SETTINGS_EEPROM_OFFSET 512  // Settings live at 512..575
+#define SETTINGS_EEPROM_SIZE 64     // Reserved size for settings blob
 #define BUF_LENGTH           128    // Command buffer length
 #define MAX_SIGNALS          4      // Maximum signals to track
 

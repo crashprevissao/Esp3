@@ -16,7 +16,7 @@ int Recording::framesInBuffer = 0;
 bool Recording::recordingMode = false;
 
 void Recording::init() {
-    EEPROM.begin(EEPROM_SIZE);
+    EEPROM.begin(EEPROM_TOTAL_SIZE);  // shared with Settings (offset 512..)
     flushBuffer();
     Serial.println("Recording module initialized");
 }

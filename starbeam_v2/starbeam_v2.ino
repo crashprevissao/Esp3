@@ -20,6 +20,8 @@
 #include "types.h"
 #include "src/display.h"
 #include "src/input.h"
+#include "src/util.h"
+#include "src/settings.h"
 
 // Radio modules
 #include "src/nrf24.h"
@@ -34,6 +36,9 @@
 #include "src/webserver.h"
 #include "src/wifi_attack.h"
 #include "src/terminal.h"
+
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
 
 // ============================================================================
 // Global State Variables
@@ -51,10 +56,64 @@ byte ccSendBuffer[64] = {0};
 // Helper Functions
 // ============================================================================
 
+// FreeRTOS-cooperative delay (yields scheduler to other tasks).
 void nonBlockingDelay(unsigned long ms) {
-    unsigned long start = millis();
-    while (millis() - start < ms) {
-        yield();  // Allow ESP32 to handle background processes
+    Util::coopDelay(ms);
+}
+
+// ----------------------------------------------------------------------------
+// Unified frequency-preset handler (Phase 1: collapses 10 STATE_SET_* cases)
+// ----------------------------------------------------------------------------
+static void runFreqPreset(float freqMhz) {
+    char l1[20], l2[20];
+    snprintf(l1, sizeof(l1), "%.2f MHz set", freqMhz);
+    snprintf(l2, sizeof(l2), "[SEL] back");
+    CC1101Radio::setMhz(freqMhz);
+    Settings::setFreq(freqMhz);
+    Serial.printf("[freq] set to %.2f MHz (persisted)\n", freqMhz);
+    Display::displayInfo("Frequency", l1, "Saved to flash", l2);
+    Util::waitForSelectOrStop();
+    Terminal::clearStopFlag();
+}
+
+// ----------------------------------------------------------------------------
+// Settings viewer (Phase 2)
+// ----------------------------------------------------------------------------
+static void runSettingsMode() {
+    while (true) {
+        char l1[24], l2[24], l3[24];
+        snprintf(l1, sizeof(l1), "Freq:%.2f MHz", Settings::freq());
+        snprintf(l2, sizeof(l2), "Echo:%s  Verb:%s",
+                 Settings::echo() ? "ON" : "off",
+                 Settings::verbose() ? "ON" : "off");
+        snprintf(l3, sizeof(l3), "Boots:%u", (unsigned)Settings::bootCount());
+        Display::displayInfo("Settings", l1, l2, l3);
+        // UP toggles echo; DOWN toggles verbose; hold SELECT resets defaults.
+        if (Input::isButtonPressed(BUTTON_UP)) {
+            Settings::setEcho(!Settings::echo());
+            Terminal::setEchoEnabled(Settings::echo());
+            vTaskDelay(pdMS_TO_TICKS(150));
+        } else if (Input::isButtonPressed(BUTTON_DOWN)) {
+            Settings::setVerbose(!Settings::verbose());
+            Terminal::setVerbose(Settings::verbose());
+            vTaskDelay(pdMS_TO_TICKS(150));
+        } else if (Input::isButtonPressed(BUTTON_SELECT)) {
+            // Long press = reset defaults; short press = exit.
+            if (Util::isLongPressSelect(LONG_PRESS_MS)) {
+                Settings::resetDefaults();
+                Terminal::setEchoEnabled(Settings::echo());
+                Terminal::setVerbose(Settings::verbose());
+                Display::displayInfo("Settings", "Reset to defaults", "", "[SEL] back");
+                Util::waitForSelectOrStop();
+            }
+            Terminal::clearStopFlag();
+            return;
+        }
+        if (Terminal::stopRequested()) {
+            Terminal::clearStopFlag();
+            return;
+        }
+        vTaskDelay(pdMS_TO_TICKS(30));
     }
 }
 
@@ -987,60 +1046,28 @@ void executeSelectedMenuItem() {
             break;
 
         case SET_43440:
-            currentState = STATE_SET_43440;
-            Serial.println("SET_43440 selected");
-            Display::displayInfo("SET_43440", "FREQ SET", "434.40MHz", "");
-            CC1101Radio::setMhz(434.40);
-            while (!Input::isButtonPressed(BUTTON_SELECT) && !Terminal::stopRequested()) {
-                Display::displayInfo("SET_43440", "Freq: 434.40MHz", "Press SELECT", "to return");
-            }
-            if (Terminal::stopRequested()) {
-                Terminal::clearStopFlag();
-            }
+            currentState = STATE_FREQ_PRESET;
+            runFreqPreset(434.40f);
             break;
 
         case SET_43430:
-            currentState = STATE_SET_43430;
-            Serial.println("SET_43430 selected");
-            Display::displayInfo("SET_43430", "FREQ SET", "434.30MHz", "");
-            CC1101Radio::setMhz(434.30);
-            while (!Input::isButtonPressed(BUTTON_SELECT) && !Terminal::stopRequested()) {
-                Display::displayInfo("SET_43430", "Freq: 434.30MHz", "Press SELECT", "to return");
-            }
-            if (Terminal::stopRequested()) {
-                Terminal::clearStopFlag();
-            }
+            currentState = STATE_FREQ_PRESET;
+            runFreqPreset(434.30f);
             break;
 
         case SET_43400:
-            currentState = STATE_SET_43400;
-            Serial.println("SET_43400 selected");
-            Display::displayInfo("SET_43400", "FREQ SET", "434.00MHz", "");
-            CC1101Radio::setMhz(434.00);
-            while (!Input::isButtonPressed(BUTTON_SELECT) && !Terminal::stopRequested()) {
-                Display::displayInfo("SET_43400", "Freq: 434.00MHz", "Press SELECT", "to return");
-            }
-            if (Terminal::stopRequested()) {
-                Terminal::clearStopFlag();
-            }
+            currentState = STATE_FREQ_PRESET;
+            runFreqPreset(434.00f);
             break;
 
         case SET_43390:
-            currentState = STATE_SET_43390;
-            Serial.println("SET_43390 selected");
-            Display::displayInfo("SET_43390", "FREQ SET", "433.90MHz", "");
-            CC1101Radio::setMhz(433.90);
-            while (!Input::isButtonPressed(BUTTON_SELECT) && !Terminal::stopRequested()) {
-                Display::displayInfo("SET_43390", "Freq: 433.90MHz", "Press SELECT", "to return");
-            }
-            if (Terminal::stopRequested()) {
-                Terminal::clearStopFlag();
-            }
+            currentState = STATE_FREQ_PRESET;
+            runFreqPreset(433.90f);
             break;
 
         case SETTINGS:
-            Display::displayInfo("Settings", "Not yet", "implemented", "");
-            nonBlockingDelay(2000);
+            currentState = STATE_SETTINGS;
+            runSettingsMode();
             break;
 
         case HELP:
@@ -1059,6 +1086,18 @@ void executeSelectedMenuItem() {
 // Setup Function
 // ============================================================================
 
+// ============================================================================
+// Background serial task (Phase 3: pinned to Core 0, runs Terminal::processInput
+// continuously so serial commands and STOP work even while UI handlers spin.)
+// ============================================================================
+static TaskHandle_t s_serialTaskHandle = nullptr;
+static void serialBridgeTask(void* /*pv*/) {
+    for (;;) {
+        Terminal::processInput();
+        vTaskDelay(pdMS_TO_TICKS(5));
+    }
+}
+
 void setup() {
     Serial.begin(115200);
 
@@ -1070,8 +1109,13 @@ void setup() {
 
     delay(1000);
 
-    // Initialize EEPROM
-    EEPROM.begin(EEPROM_SIZE);
+    // Initialize EEPROM (now 1024 bytes: 0..511 recording, 512..575 settings)
+    EEPROM.begin(EEPROM_TOTAL_SIZE);
+
+    // Load persisted settings BEFORE we apply them to subsystems
+    Settings::init();
+    Terminal::setEchoEnabled(Settings::echo());
+    Terminal::setVerbose(Settings::verbose());
 
     // Initialize display
     Display::init();
@@ -1087,9 +1131,8 @@ void setup() {
     // Initialize web server (doesn't start AP yet)
     StarbeamWebServer::init();
 
-    // Display title screen
-    Display::displayTitleScreen();
-    delay(2000);
+    // Animated boot intro
+    Display::playBootAnimation();
 
     // Initialize CC1101 radios at startup (like V1)
     CC1101Radio::init();
@@ -1117,6 +1160,17 @@ void setup() {
     // Initialize recording module
     Recording::init();
 
+    // Apply persisted CC1101 frequency
+    CC1101Radio::setMhz(Settings::freq());
+    Serial.printf("[freq] applied persisted %.2f MHz\n", Settings::freq());
+
+    // Spawn serial bridge task on Core 0. This lets serial commands and STOP
+    // be processed even while UI handlers are inside their inner loops.
+    xTaskCreatePinnedToCore(
+        serialBridgeTask, "serial_bridge",
+        TASK_STACK_SIZE_INPUT, nullptr,
+        PRIORITY_INPUT, &s_serialTaskHandle, CORE_RADIO);
+
     // Draw initial menu
     Display::drawMenu(selectedMenuItem, firstVisibleMenuItem);
 
@@ -1130,9 +1184,9 @@ void setup() {
 
 void loop() {
     // ========================================================================
-    // STEP 1: Process serial input (non-blocking)
+    // STEP 1: Serial input is handled by serialBridgeTask on Core 0.
+    //         Here we only check for parsed commands.
     // ========================================================================
-    Terminal::processInput();
 
     // ========================================================================
     // STEP 2: Check for serial command and execute it
@@ -1219,16 +1273,8 @@ void loop() {
         case STATE_GET_RSSI:
         case STATE_STOP_ALL:
         case STATE_RESET_CC:
-        case STATE_SET_43392:
-        case STATE_SET_43400:
-        case STATE_SET_43390:
-        case STATE_SET_43387:
-        case STATE_SET_38800:
-        case STATE_SET_39000:
-        case STATE_SET_40000:
-        case STATE_SET_434500:
-        case STATE_SET_43440:
-        case STATE_SET_43430:
+        case STATE_FREQ_PRESET:
+        case STATE_SETTINGS:
         case STATE_TEST_NRF:
         case STATE_TEST_NRF_5:
         case STATE_TEST_CC1101:

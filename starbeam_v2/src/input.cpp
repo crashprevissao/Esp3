@@ -4,6 +4,9 @@
 #include "input.h"
 #include "display.h"
 
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
+
 // Static member initialization
 bool Input::buttonPressed = false;
 
@@ -20,7 +23,9 @@ void Input::init() {
 
 bool Input::isButtonPressed(uint8_t pin) {
     if (digitalRead(pin) == LOW) {
-        delay(100);  // Debounce delay (V1 style - blocking)
+        // Cooperative debounce: vTaskDelay yields to other FreeRTOS tasks
+        // (serial bridge on Core 0, web server, etc.) instead of busy-waiting.
+        vTaskDelay(pdMS_TO_TICKS(DEBOUNCE_MS));
         if (digitalRead(pin) == LOW) {
             digitalWrite(LED_PIN, HIGH);  // Turn on LED
             return true;
