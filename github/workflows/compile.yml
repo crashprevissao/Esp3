@@ -1,7 +1,9 @@
 name: Compilar Firmware Starbeam v2
 
 on:
-  workflow_dispatch: # Permite que você ative a compilação manualmente clicando em um botão
+  push:
+    branches: [ "principal" ] # Dispara automaticamente quando você faz alterações na branch principal
+  workflow_dispatch: # Mantém o botão manual se você precisar
 
 jobs:
   build:
@@ -21,40 +23,34 @@ jobs:
 
       - name: Instalando as Bibliotecas Necessárias
         run: |
-          # Criando a pasta padrão de bibliotecas do Arduino
           mkdir -p "$HOME/Arduino/libraries"
-          
-          # Instalando as dependências da tela OLED via gerenciador oficial
           arduino-cli lib install "Adafruit SSD1306"
           arduino-cli lib install "Adafruit GFX Library"
           
-          # Movendo a biblioteca customizada do CC1101 que já está no seu repositório
-          cp -r SmartRC-CC1101-Driver-Lib2 "$HOME/Arduino/libraries/"
+          # Se a pasta da biblioteca estiver na raiz do seu repositório:
+          if [ -d "SmartRC-CC1101-Driver-Lib2" ]; then
+            cp -r SmartRC-CC1101-Driver-Lib2 "$HOME/Arduino/libraries/"
+          fi
 
       - name: Compilando o Projeto (Configuração Huge APP)
         run: |
           mkdir -p build
-          # Compila apontando para o ESP32 Dev Module com o esquema de partição Huge APP
-          arduino-cli compile --fqbn esp32:esp32:esp32:PartitionScheme=huge_app \
-            --build-path ./build \
-            ./starbeam_v2/starbeam_v2.ino
+          # Altere o caminho se o seu arquivo .ino estiver dentro de outra pasta (ex: starbeam_v1 ou starbeam_v2)
+          # Aqui ele vai procurar o arquivo .ino no seu repositório
+          INO_FILE=$(find . -name "*.ino" | head -n 1)
+          arduino-cli compile --fqbn esp32:esp32:esp32:PartitionScheme=huge_app --build-path ./build "$INO_FILE"
 
       - name: Organizando os 4 Arquivos Binários
         run: |
           mkdir -p output_bins
           
-          # Copia e renomeia os 3 arquivos gerados na compilação
-          cp build/starbeam_v2.ino.bin output_bins/firmware.bin
-          cp build/starbeam_v2.ino.bootloader.bin output_bins/bootloader.bin
-          cp build/starbeam_v2.ino.partitions.bin output_bins/partitions.bin
+          # Copia os arquivos gerados dinamicamente
+          cp build/*.bin output_bins/
           
-          # Encontra e extrai o boot_app0.bin padrão do pacote original da Espressif
+          # Encontra e extrai o boot_app0.bin padrão do ecossistema Espressif
           BOOT_APP_PATH=$(find ~/.arduino15/packages/esp32/hardware/esp32/ -name "boot_app0.bin" | head -n 1)
           if [ -f "$BOOT_APP_PATH" ]; then
             cp "$BOOT_APP_PATH" output_bins/boot_app0.bin
-            echo "boot_app0.bin coletado com sucesso!"
-          else
-            echo "Erro: boot_app0.bin não encontrado no ecossistema Espressif." && exit 1
           fi
 
       - name: Disponibilizar arquivos para Download (Artifacts)
