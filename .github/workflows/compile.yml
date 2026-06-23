@@ -26,6 +26,7 @@ jobs:
           mkdir -p "$HOME/Arduino/libraries"
           arduino-cli lib install "Adafruit SSD1306"
           arduino-cli lib install "Adafruit GFX Library"
+          arduino-cli lib install "U8g2_for_Adafruit_GFX" # <-- Adicionada a biblioteca que estava em falta
           
           if [ -d "SmartRC-CC1101-Driver-Lib2" ]; then
             cp -r SmartRC-CC1101-Driver-Lib2 "$HOME/Arduino/libraries/"
