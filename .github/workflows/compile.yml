@@ -3,8 +3,6 @@ name: Compilar ESP32
 on:
   push:
     branches: [main, master]
-  pull_request:
-    branches: [main, master]
   workflow_dispatch:
 
 jobs:
@@ -12,8 +10,7 @@ jobs:
     runs-on: ubuntu-latest
     
     steps:
-      - name: Baixar código
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
       - name: Instalar Arduino CLI
         run: |
@@ -36,16 +33,12 @@ jobs:
           arduino-cli lib install "RF24"
           arduino-cli lib install "rc-switch"
           arduino-cli lib install "SmartRC-CC1101-Driver-Lib@3.0.2"
-          
-          # Biblioteca extra do GitHub
           cd ~/Arduino/libraries
           git clone https://github.com/olikraus/U8g2_for_Adafruit_GFX.git 2>/dev/null || true
 
-      - name: Corrigir CC1101 (ELECHOUSE_CC1101_2)
+      - name: Corrigir CC1101
         run: |
           LIB="$HOME/Arduino/libraries/SmartRC-CC1101-Driver-Lib"
-          
-          # Criar arquivo de compatibilidade
           cat > "$LIB/ELECHOUSE_CC1101_SRC_DRV2.h" << 'EOF'
           #ifndef ELECHOUSE_CC1101_SRC_DRV2_h
           #define ELECHOUSE_CC1101_SRC_DRV2_h
@@ -55,9 +48,12 @@ jobs:
           };
           #endif
           EOF
-          
           touch "$LIB/ELECHOUSE_CC1101_SRC_DRV2.cpp"
-          echo "Correção aplicada!"
+
+      - name: Corrigir erro BLE
+        run: |
+          sed -i 's/BLEScanResults\* scanResults = pBLEScan->start/BLEScanResults scanResults = pBLEScan->start/g' starbeam_v2/src/ble_scanner.cpp
+          sed -i 's/scanResults->/scanResults./g' starbeam_v2/src/ble_scanner.cpp
 
       - name: Compilar
         run: |
@@ -66,22 +62,19 @@ jobs:
             --output-dir build \
             starbeam_v2/starbeam_v2.ino
 
-      - name: Preparar Firmware
+      - name: Criar Firmware ZIP
         run: |
           mkdir -p firmware
           cp build/*.bin firmware/
-          
           ESP32="$HOME/.arduino15/packages/esp32/hardware/esp32/2.0.17"
           cp "$ESP32/tools/sdk/esp32/bin/bootloader_dio_80m.bin" firmware/bootloader.bin
           cp "$ESP32/tools/sdk/esp32/bin/boot_app0.bin" firmware/
           cp "$ESP32/tools/partitions/default.bin" firmware/partitions.bin
-          
           cd firmware
           mv *.ino.bin app.bin 2>/dev/null || true
-          zip ../firmware_esp32.zip bootloader.bin partitions.bin boot_app0.bin app.bin
+          zip ../firmware_esp32.zip *.bin
 
-      - name: Upload do Firmware
-        uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v4
         with:
           name: firmware-esp32
           path: firmware_esp32.zip
