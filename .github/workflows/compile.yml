@@ -1,4 +1,4 @@
-name: Compilar Projeto ESP32
+name: Build Arduino Project
 
 on:
   push:
@@ -9,37 +9,35 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
-
     steps:
-      - name: Baixando o código do repositório
+      - name: Checkout do Código
         uses: actions/checkout@v4
 
-      - name: Configurando o Arduino CLI
+      - name: Setup Arduino CLI
         uses: arduino/setup-arduino-cli@v2
-        with:
-          version: 1.x
 
-      - name: Instalando o suporte ao ESP32
+      - name: Instalar Suporte ao ESP32
         run: |
           arduino-cli core update-index --additional-urls https://raw.githubusercontent.com/espressif/arduino-esp32/gh-pages/package_esp32_index.json
           arduino-cli core install esp32:esp32 --additional-urls https://raw.githubusercontent.com/espressif/arduino-esp32/gh-pages/package_esp32_index.json
 
-      - name: Instalando as Bibliotecas Necessárias
+      - name: Instalar Bibliotecas
         run: |
-          mkdir -p "$HOME/Arduino/libraries"
+          # O arduino-cli instala por padrão em /home/runner/Arduino/libraries
           arduino-cli lib install "Adafruit SSD1306"
           arduino-cli lib install "Adafruit GFX Library"
           arduino-cli lib install "U8g2_for_Adafruit_GFX"
-          arduino-cli lib install "RF24"
-          
-          if [ -d "SmartRC-CC1101-Driver-Lib2" ]; then
-            cp -r SmartRC-CC1101-Driver-Lib2 "$HOME/Arduino/libraries/"
-          fi
+          arduino-cli lib install "SmartRC-CC1101-Driver-Lib"
 
-      - name: Compilando o Projeto (Configuração Huge APP)
+      - name: Compilar Projeto
         run: |
+          # Criar pasta de build se não existir
           mkdir -p build
+          
+          # Compilar apontando explicitamente para a pasta de bibliotecas
+          # O parâmetro --libraries garante que o compilador encontre as libs instaladas
           arduino-cli compile --fqbn esp32:esp32:esp32:PartitionScheme=huge_app \
+            --libraries /home/runner/Arduino/libraries \
             --build-path ./build \
             ./starbeam_v2/starbeam_v2.ino
             
