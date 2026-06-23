@@ -2,8 +2,8 @@ name: Compilar Firmware Starbeam v2
 
 on:
   push:
-    branches: [ "principal" ] # Dispara automaticamente quando você faz alterações na branch principal
-  workflow_dispatch: # Mantém o botão manual se você precisar
+    branches: [ "principal" ] # Dispara automaticamente ao atualizar esta branch
+  workflow_dispatch: # Mantém o botão para disparar manualmente
 
 jobs:
   build:
@@ -27,7 +27,6 @@ jobs:
           arduino-cli lib install "Adafruit SSD1306"
           arduino-cli lib install "Adafruit GFX Library"
           
-          # Se a pasta da biblioteca estiver na raiz do seu repositório:
           if [ -d "SmartRC-CC1101-Driver-Lib2" ]; then
             cp -r SmartRC-CC1101-Driver-Lib2 "$HOME/Arduino/libraries/"
           fi
@@ -35,19 +34,21 @@ jobs:
       - name: Compilando o Projeto (Configuração Huge APP)
         run: |
           mkdir -p build
-          # Altere o caminho se o seu arquivo .ino estiver dentro de outra pasta (ex: starbeam_v1 ou starbeam_v2)
-          # Aqui ele vai procurar o arquivo .ino no seu repositório
-          INO_FILE=$(find . -name "*.ino" | head -n 1)
-          arduino-cli compile --fqbn esp32:esp32:esp32:PartitionScheme=huge_app --build-path ./build "$INO_FILE"
+          # Aponta diretamente para o arquivo principal correto dentro da pasta starbeam_v2
+          arduino-cli compile --fqbn esp32:esp32:esp32:PartitionScheme=huge_app \
+            --build-path ./build \
+            ./starbeam_v2/starbeam_v2.ino
 
       - name: Organizando os 4 Arquivos Binários
         run: |
           mkdir -p output_bins
           
-          # Copia os arquivos gerados dinamicamente
-          cp build/*.bin output_bins/
+          # Copia os ficheiros gerados (.bin, .elf, etc)
+          cp build/starbeam_v2.ino.bin output_bins/firmware.bin
+          cp build/starbeam_v2.ino.bootloader.bin output_bins/bootloader.bin
+          cp build/starbeam_v2.ino.partitions.bin output_bins/partitions.bin
           
-          # Encontra e extrai o boot_app0.bin padrão do ecossistema Espressif
+          # Procura e extrai o boot_app0.bin oficial do pacote instalado da Espressif
           BOOT_APP_PATH=$(find ~/.arduino15/packages/esp32/hardware/esp32/ -name "boot_app0.bin" | head -n 1)
           if [ -f "$BOOT_APP_PATH" ]; then
             cp "$BOOT_APP_PATH" output_bins/boot_app0.bin
