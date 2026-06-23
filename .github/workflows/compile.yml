@@ -23,21 +23,27 @@ jobs:
 
       - name: Instalar Bibliotecas
         run: |
-          # O arduino-cli instala por padrão em /home/runner/Arduino/libraries
+          # Instalação das bibliotecas necessárias via gerenciador
           arduino-cli lib install "Adafruit SSD1306"
           arduino-cli lib install "Adafruit GFX Library"
           arduino-cli lib install "U8g2_for_Adafruit_GFX"
-          arduino-cli lib install "SmartRC-CC1101-Driver-Lib"
+          arduino-cli lib install "RF24"
+          
+          # Caso você tenha alguma biblioteca local no seu repositório, ela será copiada para a pasta correta
+          if [ -d "SmartRC-CC1101-Driver-Lib2" ]; then
+            mkdir -p "$HOME/Arduino/libraries/"
+            cp -r SmartRC-CC1101-Driver-Lib2 "$HOME/Arduino/libraries/"
+          fi
 
       - name: Compilar Projeto
         run: |
-          # Criar pasta de build se não existir
+          # Garante a existência da pasta de build
           mkdir -p build
           
-          # Compilar apontando explicitamente para a pasta de bibliotecas
-          # O parâmetro --libraries garante que o compilador encontre as libs instaladas
+          # Compilação do arquivo .ino
+          # --fqbn é a placa definida
+          # --build-path define onde o binário será gerado
           arduino-cli compile --fqbn esp32:esp32:esp32:PartitionScheme=huge_app \
-            --libraries /home/runner/Arduino/libraries \
             --build-path ./build \
             ./starbeam_v2/starbeam_v2.ino
             
