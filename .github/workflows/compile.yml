@@ -55,10 +55,10 @@ jobs:
           sed -i 's/BLEScanResults\* scanResults = pBLEScan->start/BLEScanResults scanResults = pBLEScan->start/g' starbeam_v2/src/ble_scanner.cpp
           sed -i 's/scanResults->/scanResults./g' starbeam_v2/src/ble_scanner.cpp
 
-      - name: Compilar
+      - name: Compilar com Huge APP
         run: |
           mkdir -p build
-          arduino-cli compile --fqbn esp32:esp32:esp32 \
+          arduino-cli compile --fqbn esp32:esp32:esp32:PartitionScheme=huge_app \
             --output-dir build \
             starbeam_v2/starbeam_v2.ino
 
@@ -69,7 +69,7 @@ jobs:
           ESP32="$HOME/.arduino15/packages/esp32/hardware/esp32/2.0.17"
           cp "$ESP32/tools/sdk/esp32/bin/bootloader_dio_80m.bin" firmware/bootloader.bin
           cp "$ESP32/tools/sdk/esp32/bin/boot_app0.bin" firmware/
-          cp "$ESP32/tools/partitions/default.bin" firmware/partitions.bin
+          cp "$ESP32/tools/partitions/huge_app.bin" firmware/partitions.bin
           cd firmware
           mv *.ino.bin app.bin 2>/dev/null || true
           zip ../firmware_esp32.zip *.bin
