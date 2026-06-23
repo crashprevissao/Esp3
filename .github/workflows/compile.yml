@@ -66,12 +66,37 @@ jobs:
         run: |
           mkdir -p firmware
           cp build/*.bin firmware/
+          
           ESP32="$HOME/.arduino15/packages/esp32/hardware/esp32/2.0.17"
-          cp "$ESP32/tools/sdk/esp32/bin/bootloader_dio_80m.bin" firmware/bootloader.bin
-          cp "$ESP32/tools/sdk/esp32/bin/boot_app0.bin" firmware/
-          cp "$ESP32/tools/partitions/huge_app.bin" firmware/partitions.bin
+          
+          # Procurar e copiar bootloader
+          BOOTLOADER=$(find "$ESP32" -name "bootloader_dio_80m.bin" 2>/dev/null | head -1)
+          if [ -n "$BOOTLOADER" ]; then
+            cp "$BOOTLOADER" firmware/bootloader.bin
+          else
+            cp build/*bootloader*.bin firmware/bootloader.bin 2>/dev/null || true
+          fi
+          
+          # Copiar boot_app0
+          BOOTAPP=$(find "$ESP32" -name "boot_app0.bin" 2>/dev/null | head -1)
+          if [ -n "$BOOTAPP" ]; then
+            cp "$BOOTAPP" firmware/
+          fi
+          
+          # Copiar partições huge_app
+          PARTITIONS=$(find "$ESP32" -name "huge_app.bin" 2>/dev/null | head -1)
+          if [ -n "$PARTITIONS" ]; then
+            cp "$PARTITIONS" firmware/partitions.bin
+          else
+            cp build/*partitions*.bin firmware/partitions.bin 2>/dev/null || true
+          fi
+          
           cd firmware
           mv *.ino.bin app.bin 2>/dev/null || true
+          
+          echo "Arquivos no firmware:"
+          ls -la *.bin
+          
           zip ../firmware_esp32.zip *.bin
 
       - uses: actions/upload-artifact@v4
