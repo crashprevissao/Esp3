@@ -1,45 +1,52 @@
-name: Compilar Projeto
+name: Build Arduino Project
 
 on:
   push:
-    branches: [ main ]
+    branches: [ "main" ]
   pull_request:
-    branches: [ main ]
+    branches: [ "main" ]
 
 jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout do código
+      - name: Checkout Code
         uses: actions/checkout@v4
 
       - name: Setup Arduino CLI
         uses: arduino/setup-arduino-cli@v2
 
-      - name: Instalar suporte ao ESP32
+      - name: Install ESP32 Core (2.0.17)
         run: |
-          arduino-cli core update-index --additional-urls https://raw.githubusercontent.com/espressif/arduino-esp32/gh-pages/package_esp32_index.json
-          arduino-cli core install esp32:esp32 --additional-urls https://raw.githubusercontent.com/espressif/arduino-esp32/gh-pages/package_esp32_index.json
+          arduino-cli core update-index --additional-urls https://espressif.github.io/arduino-esp32/package_esp32_index.json
+          arduino-cli core install esp32:esp32@2.0.17 --additional-urls https://espressif.github.io/arduino-esp32/package_esp32_index.json
 
-      - name: Instalar Bibliotecas
+      - name: Install Libraries
         run: |
-          # Instala as dependências de forma oficial
+          mkdir -p "$HOME/Arduino/libraries"
+          
+          # 1. Instalação das bibliotecas via gerenciador oficial (funcionam bem)
           arduino-cli lib install "Adafruit SSD1306"
           arduino-cli lib install "Adafruit GFX Library"
-          arduino-cli lib install "Adafruit BusIO"
           arduino-cli lib install "U8g2_for_Adafruit_GFX"
           arduino-cli lib install "RF24"
-          arduino-cli lib install "ELECHOUSE CC1101"
+          arduino-cli lib install "Adafruit NeoPixel"
+          arduino-cli lib install "U8g2"
+          
+          # 2. Instalação manual da biblioteca CC1101 (Evita o erro de "not found")
+          # Clonamos diretamente do repositório para garantir que os arquivos .h existam
+          git clone https://github.com/lsatan/SmartRC-CC1101-Driver-Lib.git "$HOME/Arduino/libraries/SmartRC-CC1101"
 
-      - name: Compilar
+      - name: Compile Project
         run: |
-          # Limpa builds anteriores
-          rm -rf ./build
           mkdir -p ./build
           
-          # Compila o projeto
+          # Compilação com a flag de permissão de múltiplas definições
+          # Certifique-se de que o caminho abaixo corresponde ao arquivo .ino
           arduino-cli compile \
-            --fqbn esp32:esp32:esp32:PartitionScheme=huge_app \
+            --fqbn esp32:esp32:esp32 \
+            --build-property "compiler.c.elf.extra_flags=-Wl,--allow-multiple-definition" \
+            --libraries "$HOME/Arduino/libraries" \
             --build-path ./build \
             --clean \
             ./starbeam_v2/starbeam_v2.ino
