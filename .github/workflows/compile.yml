@@ -36,10 +36,17 @@ jobs:
         arduino-cli lib install "Adafruit BusIO"
         arduino-cli lib install "U8g2"
         
+        # Biblioteca U8g2_for_Adafruit_GFX (do GitHub - não está no Library Manager)
+        cd ~/Arduino/libraries
+        git clone https://github.com/olikraus/U8g2_for_Adafruit_GFX.git
+        
+        # Voltar para o diretório do projeto
+        cd $GITHUB_WORKSPACE
+        
         # Bibliotecas de RF
         arduino-cli lib install "RF24"
         arduino-cli lib install "SmartRC-CC1101-Driver-Lib@3.0.2"
-        arduino-cli lib install "rc-switch"  # <-- Biblioteca que faltava!
+        arduino-cli lib install "rc-switch"
 
     - name: Corrigir referência da biblioteca CC1101
       run: |
@@ -59,26 +66,8 @@ jobs:
       run: |
         mkdir -p build
         
-        # IMPORTANTE: Especifique o caminho correto do seu sketch principal
-        # Ajuste conforme a estrutura do seu repositório
-        # Exemplos comuns:
+        # Caminho do seu sketch
         SKETCH="starbeam_v2/starbeam_v2.ino"
-        # ou: SKETCH="src/starbeam_v2.ino"
-        # ou: SKETCH="firmware/starbeam_v2.ino"
-        
-        # Verificar se o arquivo existe
-        if [ ! -f "$SKETCH" ]; then
-          echo "Procurando arquivo .ino no repositório..."
-          find . -name "*.ino" -type f ! -path "./SmartRC-CC1101-Driver-Lib/*" ! -path "./build/*" -print
-          
-          # Tenta encontrar o sketch principal (excluindo exemplos de bibliotecas)
-          SKETCH=$(find . -name "*.ino" -type f ! -path "./SmartRC-CC1101-Driver-Lib/*" ! -path "./build/*" ! -path "*/examples/*" | head -1)
-          
-          if [ -z "$SKETCH" ]; then
-            echo "Erro: Nenhum arquivo .ino válido encontrado"
-            exit 1
-          fi
-        fi
         
         echo "Compilando: $SKETCH"
         
@@ -108,7 +97,7 @@ jobs:
         
         # Renomear o arquivo principal
         for f in *.ino.bin; do
-          [ -f "$f" ] && mv "$f" app.bin"
+          [ -f "$f" ] && mv "$f" app.bin
         done
         
         # Criar ZIP
