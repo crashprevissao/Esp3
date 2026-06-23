@@ -2,48 +2,41 @@ name: Build Arduino Project
 
 on:
   push:
-    branches: [ main ]
+    branches: [ "main" ]
   pull_request:
-    branches: [ main ]
+    branches: [ "main" ]
 
 jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout do Código
+      - name: Checkout Code
         uses: actions/checkout@v4
 
       - name: Setup Arduino CLI
         uses: arduino/setup-arduino-cli@v2
 
-      - name: Instalar Suporte ao ESP32
+      - name: Install ESP32 Core
         run: |
           arduino-cli core update-index --additional-urls https://raw.githubusercontent.com/espressif/arduino-esp32/gh-pages/package_esp32_index.json
           arduino-cli core install esp32:esp32 --additional-urls https://raw.githubusercontent.com/espressif/arduino-esp32/gh-pages/package_esp32_index.json
 
-      - name: Instalar Bibliotecas
+      - name: Install Libraries
         run: |
+          mkdir -p "$HOME/Arduino/libraries"
           # Instalação das bibliotecas necessárias via gerenciador
           arduino-cli lib install "Adafruit SSD1306"
           arduino-cli lib install "Adafruit GFX Library"
           arduino-cli lib install "U8g2_for_Adafruit_GFX"
-          arduino-cli lib install "RF24"
           
-          # Caso você tenha alguma biblioteca local no seu repositório, ela será copiada para a pasta correta
+          # Copia a biblioteca local SmartRC-CC1101-Driver-Lib2 se ela estiver na raiz do seu repositório
           if [ -d "SmartRC-CC1101-Driver-Lib2" ]; then
-            mkdir -p "$HOME/Arduino/libraries/"
             cp -r SmartRC-CC1101-Driver-Lib2 "$HOME/Arduino/libraries/"
           fi
 
-      - name: Compilar Projeto
+      - name: Compile Project
         run: |
-          # Garante a existência da pasta de build
           mkdir -p build
+          # Compilação direcionada para o seu arquivo .ino
+          arduino-cli compile --fqbn esp32:esp32:esp32:PartitionScheme=huge_app --build-path ./build ./starbeam_v2/starbeam_v2.ino
           
-          # Compilação do arquivo .ino
-          # --fqbn é a placa definida
-          # --build-path define onde o binário será gerado
-          arduino-cli compile --fqbn esp32:esp32:esp32:PartitionScheme=huge_app \
-            --build-path ./build \
-            ./starbeam_v2/starbeam_v2.ino
-            
