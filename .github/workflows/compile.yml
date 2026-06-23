@@ -15,128 +15,155 @@ jobs:
     - name: Checkout código
       uses: actions/checkout@v4
 
-    - name: Configurar Arduino CLI
-      uses: arduino/setup-arduino-cli@v1
-      with:
-        version: '0.35.0'
-
-    - name: Instalar ESP32 Core
+    - name: Instalar Arduino CLI manualmente
       run: |
-        arduino-cli config init
-        arduino-cli config add board_manager.additional_urls "https://raw.githubusercontent.com/espressif/arduino-esp32/gh-pages/package_esp32_index.json"
+        # Baixar e instalar Arduino CLI diretamente
+        curl -fsSL https://raw.githubusercontent.com/arduino/arduino-cli/master/install.sh | sh
+        sudo mv bin/arduino-cli /usr/local/bin/
+        
+        # Verificar instalação
+        arduino-cli version
+
+    - name: Configurar ESP32 Core
+      run: |
+        # Configurar URLs adicionais
+        arduino-cli config init || true
+        arduino-cli config set board_manager.additional_urls "https://raw.githubusercontent.com/espressif/arduino-esp32/gh-pages/package_esp32_index.json"
         arduino-cli core update-index
+        
+        # Instalar core ESP32 versão 2.0.17
         arduino-cli core install esp32:esp32@2.0.17
 
     - name: Instalar bibliotecas necessárias
       run: |
-        # Bibliotecas da Adafruit para display
+        # Criar diretório de bibliotecas
+        mkdir -p ~/Arduino/libraries
+        
+        # Instalar bibliotecas via Arduino CLI
         arduino-cli lib install "Adafruit GFX Library"
         arduino-cli lib install "Adafruit SSD1306"
         arduino-cli lib install "Adafruit BusIO"
-        
-        # Biblioteca U8g2
         arduino-cli lib install "U8g2"
-        
-        # Biblioteca RF24
         arduino-cli lib install "RF24"
-        
-        # Biblioteca CC1101 (SmartRC)
-        arduino-cli lib install "SmartRC-CC1101-Driver-Lib"
+        arduino-cli lib install "SmartRC-CC1101-Driver-Lib@3.0.2"
 
     - name: Corrigir referência da biblioteca CC1101
       run: |
-        # O erro é que o código procura ELECHOUSE_CC1101_SRC_DRV2.h
-        # mas a biblioteca tem ELECHOUSE_CC1101_SRC_DRV.h
-        # Vamos criar um arquivo wrapper ou modificar o include
-        
-        # Opção 1: Criar symlink/alias para o arquivo
+        # Criar arquivo wrapper para compatibilidade
         LIB_PATH="$HOME/Arduino/libraries/SmartRC-CC1101-Driver-Lib"
-        if [ -f "$LIB_PATH/ELECHOUSE_CC1101_SRC_DRV.h" ]; then
-          cp "$LIB_PATH/ELECHOUSE_CC1101_SRC_DRV.h" "$LIB_PATH/ELECHOUSE_CC1101_SRC_DRV2.h"
-          cp "$LIB_PATH/ELECHOUSE_CC1101_SRC_DRV.cpp" "$LIB_PATH/ELECHOUSE_CC1101_SRC_DRV2.cpp" 2>/dev/null || true
-        fi
         
-        # Opção 2: Corrigir o arquivo cc1101.h no seu projeto
-        # Descomente se quiser modificar o arquivo diretamente:
-        # sed -i 's/ELECHOUSE_CC1101_SRC_DRV2.h/ELECHOUSE_CC1101_SRC_DRV.h/g' src/cc1101.h
+        if [ -d "$LIB_PATH" ]; then
+          # Copiar o arquivo com nome antigo para compatibilidade
+          if [ -f "$LIB_PATH/ELECHOUSE_CC1101_SRC_DRV.h" ]; then
+            cp "$LIB_PATH/ELECHOUSE_CC1101_SRC_DRV.h" "$LIB_PATH/ELECHOUSE_CC1101_SRC_DRV2.h"
+          fi
+          if [ -f "$LIB_PATH/ELECHOUSE_CC1101_SRC_DRV.cpp" ]; then
+            cp "$LIB_PATH/ELECHOUSE_CC1101_SRC_DRV.cpp" "$LIB_PATH/ELECHOUSE_CC1101_SRC_DRV2.cpp"
+          fi
+          echo "Biblioteca CC1101 corrigida"
+        else
+          echo "Aviso: Diretório da biblioteca não encontrado em $LIB_PATH"
+          # Listar diretórios para debug
+          find ~/Arduino -type d -name "*CC1101*" 2>/dev/null || true
+        fi
 
     - name: Compilar projeto
       run: |
         # Criar diretório de build
         mkdir -p build
         
-        # Compilar o sketch
-        # Ajuste o nome do sketch e a placa conforme necessário
-        arduino-cli compile --fqbn esp32:esp32:esp32 \
-          --output-dir build \
-          --build-path build \
-          ./starbeam_v2/starbeam_v2.ino
-
-    - name: Preparar arquivos binários para flash
-      run: |
-        # Criar diretório para os bins finais
-        mkdir -p firmware
+        # Encontrar o arquivo .ino (ajuste se necessário)
+        SKETCH=$(find . -name "*.ino" -type f | head -1)
         
-        # Copiar o arquivo do aplicativo compilado
-        cp build/*.bin firmware/ 2>/dev/null || true
-        
-        # Obter os arquivos necessários do SDK do ESP32
-        ESP32_SDK="$HOME/.arduino15/packages/esp32/hardware/esp32/2.0.17/tools/sdk"
-        
-        # Copiar bootloader (ajuste conforme a configuração da sua placa)
-        # Para ESP32 com Flash DIO 80MHz (configuração padrão)
-        cp "$ESP32_SDK/bin/bootloader_dio_80m.bin" firmware/bootloader.bin
-        
-        # Copiar arquivo de inicialização do app
-        cp "$ESP32_SDK/bin/boot_app0.bin" firmware/
-        
-        # Gerar arquivo de partições
-        # Procurar o partitions.bin no build ou usar um padrão
-        if [ -f build/*partitions.bin ]; then
-          cp build/*partitions.bin firmware/partitions.bin
-        else
-          # Usar o arquivo de partições padrão do SDK
-          cp "$ESP32_SDK/bin/partitions.bin" firmware/partitions.bin 2>/dev/null || \
-          cp "$HOME/.arduino15/packages/esp32/hardware/esp32/2.0.17/tools/partitions/default.bin" firmware/partitions.bin
+        if [ -z "$SKETCH" ]; then
+          echo "Erro: Nenhum arquivo .ino encontrado"
+          exit 1
         fi
         
-        # Listar arquivos para verificação
-        echo "Arquivos gerados:"
+        echo "Compilando: $SKETCH"
+        
+        # Compilar
+        arduino-cli compile --fqbn esp32:esp32:esp32 \
+          --output-dir build \
+          "$SKETCH"
+
+    - name: Preparar arquivos binários
+      run: |
+        # Criar diretório firmware
+        mkdir -p firmware
+        
+        # Copiar binários do build
+        cp build/*.bin firmware/ 2>/dev/null || true
+        
+        # Encontrar o SDK do ESP32
+        ESP32_PATH="$HOME/.arduino15/packages/esp32/hardware/esp32/2.0.17"
+        
+        if [ -d "$ESP32_PATH" ]; then
+          # Copiar bootloader
+          cp "$ESP32_PATH/tools/sdk/esp32/bin/bootloader_dio_80m.bin" firmware/bootloader.bin
+          
+          # Copiar boot_app0
+          cp "$ESP32_PATH/tools/sdk/esp32/bin/boot_app0.bin" firmware/
+          
+          # Copiar partições padrão
+          cp "$ESP32_PATH/tools/partitions/default.bin" firmware/partitions.bin 2>/dev/null || \
+          cp "$ESP32_PATH/tools/sdk/esp32/bin/partitions.bin" firmware/partitions.bin
+          
+          echo "Arquivos do SDK copiados com sucesso"
+        else
+          echo "SDK não encontrado em $ESP32_PATH, procurando..."
+          find ~/.arduino15 -name "bootloader_dio_80m.bin" -o -name "boot_app0.bin" 2>/dev/null | head -20
+        fi
+        
+        echo "Arquivos no diretório firmware:"
         ls -la firmware/
 
-    - name: Criar ZIP com os 4 arquivos
+    - name: Criar ZIP com firmware
       run: |
-        # Criar o ZIP com os 4 arquivos necessários
         cd firmware
         
-        # Renomear para nomes padronizados se necessário
-        mv *ino.bin app.bin 2>/dev/null || true
+        # Renomear o arquivo principal para app.bin
+        for f in *.ino.bin; do
+          [ -f "$f" ] && mv "$f" app.bin
+        done
+        
+        # Verificar se temos todos os arquivos
+        if [ ! -f "bootloader.bin" ]; then
+          echo "Erro: bootloader.bin não encontrado"
+          exit 1
+        fi
+        
+        if [ ! -f "partitions.bin" ]; then
+          echo "Erro: partitions.bin não encontrado"
+          exit 1
+        fi
+        
+        if [ ! -f "boot_app0.bin" ]; then
+          echo "Erro: boot_app0.bin não encontrado"
+          exit 1
+        fi
+        
+        if [ ! -f "app.bin" ]; then
+          echo "Erro: app.bin não encontrado"
+          ls -la
+          exit 1
+        fi
         
         # Criar ZIP
-        zip ../firmware_esp32.zip \
-          bootloader.bin \
-          partitions.bin \
-          boot_app0.bin \
-          app.bin
+        zip ../firmware_esp32.zip bootloader.bin partitions.bin boot_app0.bin app.bin
         
         cd ..
         
-        echo "ZIP criado com sucesso:"
+        echo "ZIP criado:"
         ls -la firmware_esp32.zip
         unzip -l firmware_esp32.zip
 
-    - name: Upload do firmware como artifact
+    - name: Upload artifact
       uses: actions/upload-artifact@v4
+      if: always()
       with:
         name: firmware-esp32
         path: |
           firmware_esp32.zip
           firmware/*.bin
-
-    - name: Release (opcional - se for uma tag)
-      if: startsWith(github.ref, 'refs/tags/')
-      uses: softprops/action-gh-release@v1
-      with:
-        files: firmware_esp32.zip
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        if-no-files-found: warn
