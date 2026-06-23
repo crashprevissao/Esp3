@@ -1,116 +1,87 @@
-name: Build ESP32 Firmware
+name: Compilar ESP32
 
 on:
   push:
-    branches: [ main, master ]
+    branches: [main, master]
   pull_request:
-    branches: [ main, master ]
+    branches: [main, master]
   workflow_dispatch:
 
 jobs:
-  build:
+  compilar:
     runs-on: ubuntu-latest
     
     steps:
-    - name: Checkout código
-      uses: actions/checkout@v4
+      - name: Baixar código
+        uses: actions/checkout@v4
 
-    - name: Instalar Arduino CLI manualmente
-      run: |
-        curl -fsSL https://raw.githubusercontent.com/arduino/arduino-cli/master/install.sh | sh
-        sudo mv bin/arduino-cli /usr/local/bin/
-        arduino-cli version
+      - name: Instalar Arduino CLI
+        run: |
+          curl -fsSL https://raw.githubusercontent.com/arduino/arduino-cli/master/install.sh | sh
+          sudo mv bin/arduino-cli /usr/local/bin/
 
-    - name: Configurar ESP32 Core
-      run: |
-        arduino-cli config init || true
-        arduino-cli config set board_manager.additional_urls "https://raw.githubusercontent.com/espressif/arduino-esp32/gh-pages/package_esp32_index.json"
-        arduino-cli core update-index
-        arduino-cli core install esp32:esp32@2.0.17
+      - name: Configurar ESP32
+        run: |
+          arduino-cli config init || true
+          arduino-cli config set board_manager.additional_urls "https://raw.githubusercontent.com/espressif/arduino-esp32/gh-pages/package_esp32_index.json"
+          arduino-cli core update-index
+          arduino-cli core install esp32:esp32@2.0.17
 
-    - name: Instalar bibliotecas necessárias
-      run: |
-        # Bibliotecas de display
-        arduino-cli lib install "Adafruit GFX Library"
-        arduino-cli lib install "Adafruit SSD1306"
-        arduino-cli lib install "Adafruit BusIO"
-        arduino-cli lib install "U8g2"
-        
-        # Biblioteca U8g2_for_Adafruit_GFX (do GitHub - não está no Library Manager)
-        cd ~/Arduino/libraries
-        git clone https://github.com/olikraus/U8g2_for_Adafruit_GFX.git
-        
-        # Voltar para o diretório do projeto
-        cd $GITHUB_WORKSPACE
-        
-        # Bibliotecas de RF
-        arduino-cli lib install "RF24"
-        arduino-cli lib install "SmartRC-CC1101-Driver-Lib@3.0.2"
-        arduino-cli lib install "rc-switch"
+      - name: Instalar Bibliotecas
+        run: |
+          arduino-cli lib install "Adafruit GFX Library"
+          arduino-cli lib install "Adafruit SSD1306"
+          arduino-cli lib install "Adafruit BusIO"
+          arduino-cli lib install "U8g2"
+          arduino-cli lib install "RF24"
+          arduino-cli lib install "rc-switch"
+          arduino-cli lib install "SmartRC-CC1101-Driver-Lib@3.0.2"
+          
+          # Biblioteca extra do GitHub
+          cd ~/Arduino/libraries
+          git clone https://github.com/olikraus/U8g2_for_Adafruit_GFX.git 2>/dev/null || true
 
-    - name: Corrigir referência da biblioteca CC1101
-      run: |
-        LIB_PATH="$HOME/Arduino/libraries/SmartRC-CC1101-Driver-Lib"
-        
-        if [ -d "$LIB_PATH" ]; then
-          if [ -f "$LIB_PATH/ELECHOUSE_CC1101_SRC_DRV.h" ]; then
-            cp "$LIB_PATH/ELECHOUSE_CC1101_SRC_DRV.h" "$LIB_PATH/ELECHOUSE_CC1101_SRC_DRV2.h"
-          fi
-          if [ -f "$LIB_PATH/ELECHOUSE_CC1101_SRC_DRV.cpp" ]; then
-            cp "$LIB_PATH/ELECHOUSE_CC1101_SRC_DRV.cpp" "$LIB_PATH/ELECHOUSE_CC1101_SRC_DRV2.cpp"
-          fi
-          echo "Biblioteca CC1101 corrigida"
-        fi
+      - name: Corrigir CC1101 (ELECHOUSE_CC1101_2)
+        run: |
+          LIB="$HOME/Arduino/libraries/SmartRC-CC1101-Driver-Lib"
+          
+          # Criar arquivo de compatibilidade
+          cat > "$LIB/ELECHOUSE_CC1101_SRC_DRV2.h" << 'EOF'
+          #ifndef ELECHOUSE_CC1101_SRC_DRV2_h
+          #define ELECHOUSE_CC1101_SRC_DRV2_h
+          #include "ELECHOUSE_CC1101_SRC_DRV.h"
+          class ELECHOUSE_CC1101_2 : public ELECHOUSE_CC1101 {
+            public: ELECHOUSE_CC1101_2() : ELECHOUSE_CC1101() {}
+          };
+          #endif
+          EOF
+          
+          touch "$LIB/ELECHOUSE_CC1101_SRC_DRV2.cpp"
+          echo "Correção aplicada!"
 
-    - name: Compilar projeto
-      run: |
-        mkdir -p build
-        
-        # Caminho do seu sketch
-        SKETCH="starbeam_v2/starbeam_v2.ino"
-        
-        echo "Compilando: $SKETCH"
-        
-        arduino-cli compile --fqbn esp32:esp32:esp32 \
-          --output-dir build \
-          "$SKETCH"
+      - name: Compilar
+        run: |
+          mkdir -p build
+          arduino-cli compile --fqbn esp32:esp32:esp32 \
+            --output-dir build \
+            starbeam_v2/starbeam_v2.ino
 
-    - name: Preparar arquivos binários
-      run: |
-        mkdir -p firmware
-        cp build/*.bin firmware/ 2>/dev/null || true
-        
-        ESP32_PATH="$HOME/.arduino15/packages/esp32/hardware/esp32/2.0.17"
-        
-        if [ -d "$ESP32_PATH" ]; then
-          cp "$ESP32_PATH/tools/sdk/esp32/bin/bootloader_dio_80m.bin" firmware/bootloader.bin
-          cp "$ESP32_PATH/tools/sdk/esp32/bin/boot_app0.bin" firmware/
-          cp "$ESP32_PATH/tools/partitions/default.bin" firmware/partitions.bin 2>/dev/null || \
-          cp "$ESP32_PATH/tools/sdk/esp32/bin/partitions.bin" firmware/partitions.bin
-        fi
-        
-        ls -la firmware/
+      - name: Preparar Firmware
+        run: |
+          mkdir -p firmware
+          cp build/*.bin firmware/
+          
+          ESP32="$HOME/.arduino15/packages/esp32/hardware/esp32/2.0.17"
+          cp "$ESP32/tools/sdk/esp32/bin/bootloader_dio_80m.bin" firmware/bootloader.bin
+          cp "$ESP32/tools/sdk/esp32/bin/boot_app0.bin" firmware/
+          cp "$ESP32/tools/partitions/default.bin" firmware/partitions.bin
+          
+          cd firmware
+          mv *.ino.bin app.bin 2>/dev/null || true
+          zip ../firmware_esp32.zip bootloader.bin partitions.bin boot_app0.bin app.bin
 
-    - name: Criar ZIP com firmware
-      run: |
-        cd firmware
-        
-        # Renomear o arquivo principal
-        for f in *.ino.bin; do
-          [ -f "$f" ] && mv "$f" app.bin
-        done
-        
-        # Criar ZIP
-        zip ../firmware_esp32.zip bootloader.bin partitions.bin boot_app0.bin app.bin
-        
-        cd ..
-        ls -la firmware_esp32.zip
-        unzip -l firmware_esp32.zip
-
-    - name: Upload artifact
-      uses: actions/upload-artifact@v4
-      with:
-        name: firmware-esp32
-        path: |
-          firmware_esp32.zip
-          firmware/*.bin
+      - name: Upload do Firmware
+        uses: actions/upload-artifact@v4
+        with:
+          name: firmware-esp32
+          path: firmware_esp32.zip
