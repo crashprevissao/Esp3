@@ -1,9 +1,10 @@
-name: Compilar Firmware Starbeam v2
+name: Compilar Projeto ESP32
 
 on:
   push:
-    branches: [ "principal" ] # Dispara automaticamente ao atualizar esta branch
-  workflow_dispatch: # Mantém o botão para disparar manualmente
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
 
 jobs:
   build:
@@ -15,6 +16,8 @@ jobs:
 
       - name: Configurando o Arduino CLI
         uses: arduino/setup-arduino-cli@v2
+        with:
+          version: 1.x
 
       - name: Instalando o suporte ao ESP32
         run: |
@@ -26,7 +29,8 @@ jobs:
           mkdir -p "$HOME/Arduino/libraries"
           arduino-cli lib install "Adafruit SSD1306"
           arduino-cli lib install "Adafruit GFX Library"
-          arduino-cli lib install "U8g2_for_Adafruit_GFX" # <-- Adicionada a biblioteca que estava em falta
+          arduino-cli lib install "U8g2_for_Adafruit_GFX"
+          arduino-cli lib install "RF24"
           
           if [ -d "SmartRC-CC1101-Driver-Lib2" ]; then
             cp -r SmartRC-CC1101-Driver-Lib2 "$HOME/Arduino/libraries/"
@@ -35,29 +39,7 @@ jobs:
       - name: Compilando o Projeto (Configuração Huge APP)
         run: |
           mkdir -p build
-          # Aponta diretamente para o arquivo principal correto dentro da pasta starbeam_v2
           arduino-cli compile --fqbn esp32:esp32:esp32:PartitionScheme=huge_app \
             --build-path ./build \
             ./starbeam_v2/starbeam_v2.ino
-
-      - name: Organizando os 4 Arquivos Binários
-        run: |
-          mkdir -p output_bins
-          
-          # Copia os ficheiros gerados (.bin, .elf, etc)
-          cp build/starbeam_v2.ino.bin output_bins/firmware.bin
-          cp build/starbeam_v2.ino.bootloader.bin output_bins/bootloader.bin
-          cp build/starbeam_v2.ino.partitions.bin output_bins/partitions.bin
-          
-          # Procura e extrai o boot_app0.bin oficial do pacote instalado da Espressif
-          BOOT_APP_PATH=$(find ~/.arduino15/packages/esp32/hardware/esp32/ -name "boot_app0.bin" | head -n 1)
-          if [ -f "$BOOT_APP_PATH" ]; then
-            cp "$BOOT_APP_PATH" output_bins/boot_app0.bin
-          fi
-
-      - name: Disponibilizar arquivos para Download (Artifacts)
-        uses: actions/upload-artifact@v4
-        with:
-          name: Starbeam-v2-Arquivos-Binarios
-          path: output_bins/
-          
+            
