@@ -1,0 +1,61 @@
+name: Compilar Firmware Starbeam v2
+
+on:
+  push:
+    branches: [ "principal" ] # Dispara automaticamente quando você faz alterações na branch principal
+  workflow_dispatch: # Mantém o botão manual se você precisar
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Baixando o código do repositório
+        uses: actions/checkout@v4
+
+      - name: Configurando o Arduino CLI
+        uses: arduino/setup-arduino-cli@v2
+
+      - name: Instalando o suporte ao ESP32
+        run: |
+          arduino-cli core update-index --additional-urls https://raw.githubusercontent.com/espressif/arduino-esp32/gh-pages/package_esp32_index.json
+          arduino-cli core install esp32:esp32 --additional-urls https://raw.githubusercontent.com/espressif/arduino-esp32/gh-pages/package_esp32_index.json
+
+      - name: Instalando as Bibliotecas Necessárias
+        run: |
+          mkdir -p "$HOME/Arduino/libraries"
+          arduino-cli lib install "Adafruit SSD1306"
+          arduino-cli lib install "Adafruit GFX Library"
+          
+          # Se a pasta da biblioteca estiver na raiz do seu repositório:
+          if [ -d "SmartRC-CC1101-Driver-Lib2" ]; then
+            cp -r SmartRC-CC1101-Driver-Lib2 "$HOME/Arduino/libraries/"
+          fi
+
+      - name: Compilando o Projeto (Configuração Huge APP)
+        run: |
+          mkdir -p build
+          # Altere o caminho se o seu arquivo .ino estiver dentro de outra pasta (ex: starbeam_v1 ou starbeam_v2)
+          # Aqui ele vai procurar o arquivo .ino no seu repositório
+          INO_FILE=$(find . -name "*.ino" | head -n 1)
+          arduino-cli compile --fqbn esp32:esp32:esp32:PartitionScheme=huge_app --build-path ./build "$INO_FILE"
+
+      - name: Organizando os 4 Arquivos Binários
+        run: |
+          mkdir -p output_bins
+          
+          # Copia os arquivos gerados dinamicamente
+          cp build/*.bin output_bins/
+          
+          # Encontra e extrai o boot_app0.bin padrão do ecossistema Espressif
+          BOOT_APP_PATH=$(find ~/.arduino15/packages/esp32/hardware/esp32/ -name "boot_app0.bin" | head -n 1)
+          if [ -f "$BOOT_APP_PATH" ]; then
+            cp "$BOOT_APP_PATH" output_bins/boot_app0.bin
+          fi
+
+      - name: Disponibilizar arquivos para Download (Artifacts)
+        uses: actions/upload-artifact@v4
+        with:
+          name: Starbeam-v2-Arquivos-Binarios
+          path: output_bins/
+          
